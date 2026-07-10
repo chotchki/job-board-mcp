@@ -1,0 +1,23 @@
+name: Live smoke
+
+# The #[ignore]d live tests never run in the push/PR CI (that stays offline). This job
+# runs them on a schedule so an ignored test can't rot green-forever: if a board changes
+# its API shape, the adapter returns ParseDrift and this fails, surfacing the drift.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  live:
+    name: live adapter smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: run ignored live tests
+        run: cargo test --test live_smoke -- --ignored

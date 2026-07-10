@@ -21,3 +21,14 @@
 - [x] B.5 - Type-system spine: newtype BoardId/ReqId/AtsToken via one serde(transparent)+sqlx(transparent) macro (gives Type+Encode+Decode from one derive), ContentHash (hex TEXT) + Currency (validated) via hand-written sqlx Type/Encode/Decode delegating to String; closed enums for Ats/workplace_type/comp interval+source/obit-kind; free text stays String; comp as integer minor units with #![deny(clippy::float_arithmetic)] atop comp.rs — note clippy silently suppresses that lint inside #[test] fns, so the i64 newtype is the real guard. Store access is sqlx (compile-time queries), not rusqlite — see D.1.
 
 
+---
+
+## 2026-07-10
+
+## Phase C - Adapters wave 1
+- [x] C.1 - greenhouse adapter + fixtures (comp.source: site_only flag path, hosted-URL variants)
+- [x] C.2 - ashby adapter + fixtures (workplaceType = truth, isRemote = noise; comp extraction from descriptionHtml; browser-UA 403 path)
+- [x] C.3 - lever adapter + fixtures
+- [x] C.4 - live smoke tests, #[ignore] by default, against 2-3 large public boards; a scheduled (weekly, not per-push) CI job runs them, so an #[ignore]d test cannot rot green-forever when an API shifts under it
+
+
