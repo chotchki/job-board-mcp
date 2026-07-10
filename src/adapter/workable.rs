@@ -190,7 +190,7 @@ impl Adapter for WorkableAdapter {
         let posting = postings
             .into_iter()
             .find(|p| p.req_id == *req_id)
-            .ok_or_else(|| AdapterError::UnknownBoard(board.id.clone()))?;
+            .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
 
         let widget = http
             .get_text(&Self::widget_url(board.token.as_str()))

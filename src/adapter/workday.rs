@@ -253,7 +253,7 @@ impl Adapter for WorkdayAdapter {
             .into_iter()
             .find(|jp| jp.bullet_fields.first().map(String::as_str) == Some(req_id.as_str()))
             .map(|jp| jp.external_path)
-            .ok_or_else(|| AdapterError::UnknownBoard(board.id.clone()))?;
+            .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
 
         let body = http
             .get_text(&Self::detail_url(host, site, &external_path))

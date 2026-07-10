@@ -8,8 +8,33 @@ use job_board_mcp::store::Store;
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
+const HELP: &str = "\
+job-board-mcp — an MCP server exposing typed, deterministic job-board tools over stdio.
+
+USAGE:
+    job-board-mcp --config <path>
+
+OPTIONS:
+    --config <path>    Path to the TOML config (or set JOB_BOARD_MCP_CONFIG)
+    -h, --help         Print this help
+    -V, --version      Print version
+
+Normally launched by an MCP client, not run directly. See docs/USAGE.md.";
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Answer --help/--version BEFORE touching config, so an unconfigured binary can still
+    // introduce itself. These go to stdout because we exit before entering server mode.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "-V" || a == "--version") {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("{HELP}");
+        return Ok(());
+    }
+
     // stdout is the JSON-RPC wire — every byte of logging goes to stderr, and a stray
     // `println!` anywhere in this process corrupts the protocol stream. A bare `fmt()`
     // subscriber ignores RUST_LOG and pins INFO; EnvFilter is what makes RUST_LOG honored.

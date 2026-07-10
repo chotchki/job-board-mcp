@@ -105,7 +105,7 @@ impl AshbyAdapter {
             .jobs
             .into_iter()
             .find(|j| j.id == req_id.as_str())
-            .ok_or_else(|| AdapterError::UnknownBoard(board.id.clone()))?;
+            .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
         let description_html = job.description_html.clone();
         let description_text = job.description_plain.clone();
         let posting = Self::to_posting(&job, board)?;

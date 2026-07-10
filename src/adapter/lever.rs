@@ -148,7 +148,8 @@ impl Adapter for LeverAdapter {
     ) -> Result<PostingDetail, AdapterError> {
         let body = http
             .get_text(&Self::detail_url(board.token.as_str(), req_id))
-            .await?;
+            .await
+            .map_err(|e| super::not_found_on_404(e, req_id))?;
         Self::parse_detail(&body, board)
     }
 }

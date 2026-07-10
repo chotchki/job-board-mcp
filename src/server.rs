@@ -55,6 +55,11 @@ pub struct JobBoardServer {
 pub struct FetchBoardArgs {
     /// The configured board's id.
     pub board_id: String,
+    /// Echo the full postings array back. Default false: a morning scan (fetch → diff)
+    /// never needs the postings in context, and a big board is hundreds of KB. Use
+    /// `diff_boards` for what changed, `fetch_posting` for one JD.
+    #[serde(default)]
+    pub full: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -103,7 +108,9 @@ struct FetchBoardResponse {
     board_id: String,
     snapshot_id: i64,
     posting_count: usize,
-    postings: Vec<Value>,
+    /// Present only when `full` was set on the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    postings: Option<Vec<Value>>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -192,11 +199,12 @@ impl JobBoardServer {
             .record_snapshot(&board.id, now(), &postings)
             .await
             .map_err(store_err)?;
+        let postings_echo = args.full.then(|| postings.iter().map(to_value).collect());
         Ok(Json(FetchBoardResponse {
             board_id: board.id.to_string(),
             snapshot_id,
             posting_count: postings.len(),
-            postings: postings.iter().map(to_value).collect(),
+            postings: postings_echo,
         }))
     }
 
@@ -297,8 +305,10 @@ fn store_err(e: StoreError) -> McpError {
 
 fn adapter_err(e: AdapterError) -> McpError {
     match e {
-        AdapterError::UnknownBoard(b) => {
-            McpError::invalid_params(format!("unknown board: {b}"), None)
+        // Bad user input (wrong board or wrong req) is invalid_params, not internal_error —
+        // it points the caller at what they passed, not at the server.
+        AdapterError::UnknownBoard(_) | AdapterError::PostingNotFound(_) => {
+            McpError::invalid_params(e.to_string(), None)
         }
         other => McpError::internal_error(other.to_string(), None),
     }

@@ -161,7 +161,7 @@ impl Adapter for GithubCareersAdapter {
                 }
             }
             if seen == 0 || (page * PAGE_LIMIT) >= total {
-                return Err(AdapterError::UnknownBoard(board.id.clone()));
+                return Err(AdapterError::PostingNotFound(req_id.clone()));
             }
             page += 1;
         }

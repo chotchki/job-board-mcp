@@ -39,6 +39,12 @@ pub enum AdapterError {
     #[error("unknown board: {0}")]
     UnknownBoard(BoardId),
 
+    /// The board is fine, but no posting with this req_id is on it — a bad `req_id`, not a
+    /// bad board. Kept distinct from `UnknownBoard`/`BoardUnreachable` so a caller isn't
+    /// misdirected toward the config when the req is the problem.
+    #[error("posting not found: {0}")]
+    PostingNotFound(ReqId),
+
     /// The board answered, but not with a usable listing — an HTTP non-success. This
     /// must NEVER be recorded as an empty snapshot (a tenant in maintenance mode
     /// returning a 200-with-empty-body is the trap): treating it as a real fetch would
@@ -65,6 +71,18 @@ impl AdapterError {
             context: context.into(),
             detail: detail.into(),
         }
+    }
+}
+
+/// Remap a 404 from a PER-POSTING endpoint (the req doesn't exist) to
+/// [`PostingNotFound`](AdapterError::PostingNotFound); pass every other failure through.
+/// The board is fine — only the req is bad — so the caller shouldn't be sent to the config.
+pub(crate) fn not_found_on_404(err: AdapterError, req_id: &ReqId) -> AdapterError {
+    match err {
+        AdapterError::BoardUnreachable { status: 404 } => {
+            AdapterError::PostingNotFound(req_id.clone())
+        }
+        other => other,
     }
 }
 
