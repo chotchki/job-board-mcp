@@ -15,7 +15,7 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 - [ ] B.2 - BoardConfig TOML + config.example.toml (db_path, per-board comp_site_only + updated_at_unreliable): serde(default) for forward-compat AND deny_unknown_fields — config is human-authored and single-reader, so a typo'd key must fail LOUD rather than silently default; test that example.toml parses and that an old-shape config loads with new fields defaulting
 - [ ] B.3 - Adapter trait + error taxonomy (UnknownBoard, BoardUnreachable{status}, ParseDrift — ParseDrift fails loudly, never guesses fields)
 - [ ] B.4 - HTTP layer: desktop-browser UA, per-host serialization + politeness delay, hard timeouts, no retry storms
-- [ ] B.5 - Type-system spine: newtype BoardId/ReqId/AtsToken/ContentHash/Currency via one serde(transparent)+FromSql/ToSql macro (ContentHash as hex, not transparent); closed enums for Ats/workplace_type/comp interval+source/obit-kind; free text stays String; comp as integer minor units with #![deny(clippy::float_arithmetic)] atop comp.rs — note clippy silently suppresses that lint inside #[test] fns, so the i64 newtype is the real guard
+- [x] B.5 - Type-system spine: newtype BoardId/ReqId/AtsToken/ContentHash/Currency via one serde(transparent)+FromSql/ToSql macro (ContentHash as hex, not transparent); closed enums for Ats/workplace_type/comp interval+source/obit-kind; free text stays String; comp as integer minor units with #![deny(clippy::float_arithmetic)] atop comp.rs — note clippy silently suppresses that lint inside #[test] fns, so the i64 newtype is the real guard
 
 ## Phase C - Adapters wave 1
 - [ ] C.1 - greenhouse adapter + fixtures (comp.source: site_only flag path, hosted-URL variants)
