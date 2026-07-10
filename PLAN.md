@@ -10,13 +10,6 @@ claude-plan-bridge is wired, drive this file through TaskCreate/TaskUpdate
 Completed phases sweep to PLAN_ARCHIVE.md.
 -->
 
-## Phase F - Adapters wave 2 (post-v0.1)
-- [x] F.1 - workday (CXS POST search; startDate = post date; maintenance mode → BoardUnreachable, never an empty board)
-- [x] F.2 - workable + smartrecruiters
-- [x] F.3 - rippling (feed = listing source, __NEXT_DATA__ = per-job ground truth)
-- [x] F.4 - github.careers (?query= ignored server-side; no-results i18n grep trap)
-- [x] F.5 - Workable adapter — blocked on a real populated board
-
 ## Backlog (not yet phased)
 
 - **Comp::Equity variant — model equity grants outside the currency path** — added 2026-07-10.

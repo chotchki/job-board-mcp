@@ -56,3 +56,14 @@
 
 - [x] E.5 - User docs: dogfooding guide + cargo install
 
+---
+
+## 2026-07-10
+
+## Phase F - Adapters wave 2 (post-v0.1)
+- [x] F.1 - workday (CXS POST search; startDate = post date; maintenance mode → BoardUnreachable, never an empty board)
+- [x] F.2 - workable + smartrecruiters
+- [x] F.3 - rippling (feed = listing source, __NEXT_DATA__ = per-job ground truth)
+- [x] F.4 - github.careers (?query= ignored server-side; no-results i18n grep trap)
+- [x] F.5 - Workable adapter — blocked on a real populated board
+
