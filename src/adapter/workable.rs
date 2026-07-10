@@ -18,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::parse;
-use super::{Adapter, AdapterError};
+use super::{Adapter, AdapterError, ListResult};
 use crate::config::BoardConfig;
 use crate::http::{FetchCtx, HttpClient};
 use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
@@ -154,7 +154,7 @@ impl Adapter for WorkableAdapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> Result<Vec<Posting>, AdapterError> {
+    ) -> Result<ListResult, AdapterError> {
         let url = Self::list_url(board.token.as_str());
         let mut postings = Vec::new();
         let mut token: Option<String> = None;
@@ -177,7 +177,7 @@ impl Adapter for WorkableAdapter {
                 _ => break,
             }
         }
-        Ok(postings)
+        Ok(postings.into())
     }
 
     async fn detail(
@@ -215,7 +215,10 @@ impl Adapter for WorkableAdapter {
             .jobs
             .into_iter()
             .find(|j| j.shortcode == req_id.as_str())
-            .and_then(|j| j.description);
+            .and_then(|j| j.description)
+            // An empty/whitespace-only widget body is "no description", not a present-but-
+            // blank one — normalize it to None so it doesn't surface as an empty JD.
+            .filter(|d| !d.trim().is_empty());
 
         Ok(PostingDetail {
             posting,

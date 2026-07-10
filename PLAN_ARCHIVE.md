@@ -85,3 +85,16 @@ added 2026-07-10.
 - [x] H.4 - H.4 - dump_captures MCP tool: write sample files to disk, return paths
 - [x] H.5 - H.5 - Capture docs + tests; version bump 0.4.0 + install
 
+---
+
+## 2026-07-10
+
+## Phase I - Dogfood round 2 fixes
+- [x] I.1 - I.1 - Workday stub tolerance (P0) + surface skipped via ListResult
+- [x] I.2 - I.2 - Persist equity: migration 0003 + store it + StoredMaterial
+- [x] I.3 - I.3 - Name equity in changed_fields (stop misattributing as description)
+- [x] I.4 - I.4 - Ledger bytes = actual byte length, not char count
+- [x] I.5 - I.5 - Surface the empty-board warning in fetch_board response
+- [x] I.6 - I.6 - Workable empty description → None (empty-component join)
+- [x] I.7 - I.7 - Docs + version bump 0.5.0 + install + release
+

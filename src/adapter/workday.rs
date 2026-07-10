@@ -23,7 +23,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::parse;
-use super::{Adapter, AdapterError};
+use super::{Adapter, AdapterError, ListResult};
 use crate::config::BoardConfig;
 use crate::http::{FetchCtx, HttpClient};
 use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
@@ -42,9 +42,14 @@ struct JobsResponse {
 
 #[derive(Deserialize)]
 struct JobPosting {
-    title: String,
-    #[serde(rename = "externalPath")]
-    external_path: String,
+    // Optional because Workday emits STUB entries mid-publish — `{"bulletFields":["…"]}`
+    // with no title or path yet. Requiring them here would fail serde on the whole page
+    // and make a board with even one in-flight posting unfetchable; instead a stub is
+    // tolerated and skipped (see `parse_page`).
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(rename = "externalPath", default)]
+    external_path: Option<String>,
     #[serde(rename = "locationsText", default)]
     locations_text: Option<String>,
     #[serde(rename = "bulletFields", default)]
@@ -104,61 +109,71 @@ impl WorkdayAdapter {
         })
     }
 
+    /// Parse one search page into postings, the board `total`, and the req_ids of any
+    /// STUB entries skipped. A stub is a posting mid-publish — Workday returns it with
+    /// `bulletFields` (so it has a req id) but no `title`/`externalPath` yet. It is NOT a
+    /// parse error: skipping it and recording its req keeps a live board fetchable while
+    /// still surfacing the in-flight req (often a NEW about to land).
     fn parse_page(
         body: &str,
         board: &BoardConfig,
         host: &str,
         site: &str,
-    ) -> Result<(Vec<Posting>, i64), AdapterError> {
+    ) -> Result<(Vec<Posting>, i64, Vec<String>), AdapterError> {
         let parsed: JobsResponse = serde_json::from_str(body)
             .map_err(|e| AdapterError::drift("workday jobs response", e.to_string()))?;
-        let postings = parsed
-            .job_postings
-            .into_iter()
-            .map(|jp| Self::to_posting(jp, board, host, site))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((postings, parsed.total))
-    }
-
-    fn to_posting(
-        jp: JobPosting,
-        board: &BoardConfig,
-        host: &str,
-        site: &str,
-    ) -> Result<Posting, AdapterError> {
-        // The req id is the first bullet field; without it we can't identify the posting.
-        let req_id = jp.bullet_fields.into_iter().next().ok_or_else(|| {
-            AdapterError::drift("workday jobPosting", "no bulletFields (req id) present")
-        })?;
-        let locations: Vec<String> = jp.locations_text.into_iter().collect();
-        let comp = Comp::None;
-        let hash = content_hash(
-            &jp.title,
-            &locations,
-            WorkplaceType::Unknown,
-            &comp,
-            Equity::None,
-            "",
-        );
-
-        Ok(Posting {
-            ats: board.ats,
-            board_id: board.id.clone(),
-            req_id: ReqId::new(req_id),
-            title: jp.title,
-            url: format!("https://{host}/{site}{}", jp.external_path),
-            locations,
-            workplace_type: WorkplaceType::Unknown,
-            remote_scope: None,
-            comp,
-            equity: Equity::None,
-            posted_at: None, // list `postedOn` is relative text; the real date is in detail
-            updated_at: None,
-            updated_at_unreliable: board.updated_at_unreliable,
-            department: None,
-            employment_type: None,
-            content_hash: hash,
-        })
+        let mut postings = Vec::new();
+        let mut skipped = Vec::new();
+        for jp in parsed.job_postings {
+            let req_id = jp.bullet_fields.into_iter().next();
+            let (Some(title), Some(external_path)) = (jp.title, jp.external_path) else {
+                // Stub: no title/path yet. Keep the req id (it names what's being touched).
+                let req = req_id.unwrap_or_else(|| "<unknown>".to_owned());
+                tracing::warn!(
+                    board = %board.id,
+                    req = %req,
+                    "workday stub posting (no title/externalPath yet, mid-publish); skipping"
+                );
+                skipped.push(req);
+                continue;
+            };
+            // A titled posting with no req id is genuinely broken, not a stub — stay loud.
+            let Some(req_id) = req_id else {
+                return Err(AdapterError::drift(
+                    "workday jobPosting",
+                    "titled posting with no bulletFields (req id)",
+                ));
+            };
+            let locations: Vec<String> = jp.locations_text.into_iter().collect();
+            let comp = Comp::None;
+            let hash = content_hash(
+                &title,
+                &locations,
+                WorkplaceType::Unknown,
+                &comp,
+                Equity::None,
+                "",
+            );
+            postings.push(Posting {
+                ats: board.ats,
+                board_id: board.id.clone(),
+                req_id: ReqId::new(req_id),
+                title,
+                url: format!("https://{host}/{site}{external_path}"),
+                locations,
+                workplace_type: WorkplaceType::Unknown,
+                remote_scope: None,
+                comp,
+                equity: Equity::None,
+                posted_at: None, // list `postedOn` is relative text; the real date is in detail
+                updated_at: None,
+                updated_at_unreliable: board.updated_at_unreliable,
+                department: None,
+                employment_type: None,
+                content_hash: hash,
+            });
+        }
+        Ok((postings, parsed.total, skipped))
     }
 
     fn detail_from(
@@ -212,12 +227,13 @@ impl Adapter for WorkdayAdapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> Result<Vec<Posting>, AdapterError> {
+    ) -> Result<ListResult, AdapterError> {
         let host = board.token.as_str();
         let site = Self::site(board)?;
         let url = Self::jobs_url(host, site);
 
         let mut postings = Vec::new();
+        let mut skipped = Vec::new();
         let mut offset: i64 = 0;
         loop {
             let body = http
@@ -227,11 +243,14 @@ impl Adapter for WorkdayAdapter {
                     &FetchCtx::from_board(board),
                 )
                 .await?;
-            let (page, total) = Self::parse_page(&body, board, host, site)?;
-            let page_len = page.len();
+            let (page, total, page_skipped) = Self::parse_page(&body, board, host, site)?;
+            // Decide "another page?" on the RAW page size (postings + skipped stubs) — a
+            // page that is ALL stubs still has entries, and more real ones may follow.
+            let page_raw = page.len() + page_skipped.len();
             postings.extend(page);
+            skipped.extend(page_skipped);
             offset += PAGE_LIMIT;
-            if page_len == 0 || offset >= total {
+            if page_raw == 0 || offset >= total {
                 break;
             }
             if postings.len() >= MAX_POSTINGS {
@@ -244,7 +263,7 @@ impl Adapter for WorkdayAdapter {
                 break;
             }
         }
-        Ok(postings)
+        Ok(ListResult { postings, skipped })
     }
 
     async fn detail(
@@ -270,7 +289,7 @@ impl Adapter for WorkdayAdapter {
             .job_postings
             .into_iter()
             .find(|jp| jp.bullet_fields.first().map(String::as_str) == Some(req_id.as_str()))
-            .map(|jp| jp.external_path)
+            .and_then(|jp| jp.external_path)
             .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
 
         let body = http
@@ -314,7 +333,7 @@ mod tests {
 
     #[test]
     fn parses_a_real_list_page() {
-        let (postings, total) = WorkdayAdapter::parse_page(
+        let (postings, total, skipped) = WorkdayAdapter::parse_page(
             include_str!("fixtures/workday_jobs.json"),
             &board(),
             "nvidia.wd5.myworkdayjobs.com",
@@ -323,6 +342,7 @@ mod tests {
         .unwrap();
         assert_eq!(total, 2000); // paginate: the list is only a page of the whole board
         assert_eq!(postings.len(), 2);
+        assert!(skipped.is_empty(), "the real fixture has no stubs");
         let p = &postings[0];
         assert_eq!(p.ats, Ats::Workday);
         assert_eq!(p.req_id, ReqId::new("JR1998928"));
@@ -366,10 +386,29 @@ mod tests {
 
     #[test]
     fn a_changed_shape_is_parse_drift() {
-        let broken = r#"{"total":1,"jobPostings":[{"externalPath":"/x"}]}"#; // no title
+        // A per-entry stub (no title) is now tolerated, so drift is a broken RESPONSE
+        // shape — here `total` is the wrong type, which no page should ever carry.
+        let broken = r#"{"total":"lots","jobPostings":[]}"#;
         assert!(matches!(
             WorkdayAdapter::parse_page(broken, &board(), "h", "s").unwrap_err(),
             AdapterError::ParseDrift { .. }
         ));
+    }
+
+    #[test]
+    fn a_stub_posting_is_skipped_not_fatal() {
+        // Disney's real failure: a page with a live posting AND a mid-publish stub
+        // (`{"bulletFields":["10151065"]}`, no title/path). The real one parses, the stub
+        // is skipped with its req surfaced, and the board stays fetchable.
+        let body = r#"{"total":2,"jobPostings":[
+            {"title":"Real Role","externalPath":"/job/Real_JR1","bulletFields":["JR1"]},
+            {"bulletFields":["10151065"]}
+        ]}"#;
+        let (postings, total, skipped) =
+            WorkdayAdapter::parse_page(body, &board(), "h.wd5.myworkdayjobs.com", "Site").unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(postings.len(), 1);
+        assert_eq!(postings[0].req_id, ReqId::new("JR1"));
+        assert_eq!(skipped, vec!["10151065".to_owned()]);
     }
 }

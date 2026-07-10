@@ -49,7 +49,11 @@ fn assert_well_formed(postings: &[Posting], board_id: &str) {
 async fn greenhouse_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("gitlab", Ats::Greenhouse, "gitlab");
-    let postings = GreenhouseAdapter.list(&http, &board).await.unwrap();
+    let postings = GreenhouseAdapter
+        .list(&http, &board)
+        .await
+        .unwrap()
+        .postings;
     assert_well_formed(&postings, "gitlab");
 
     // Exercise the detail path too.
@@ -65,7 +69,7 @@ async fn greenhouse_live() {
 async fn ashby_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("ramp", Ats::Ashby, "ramp");
-    let postings = AshbyAdapter.list(&http, &board).await.unwrap();
+    let postings = AshbyAdapter.list(&http, &board).await.unwrap().postings;
     assert_well_formed(&postings, "ramp");
 }
 
@@ -74,7 +78,7 @@ async fn ashby_live() {
 async fn lever_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("gopuff", Ats::Lever, "gopuff");
-    let postings = LeverAdapter.list(&http, &board).await.unwrap();
+    let postings = LeverAdapter.list(&http, &board).await.unwrap().postings;
     assert_well_formed(&postings, "gopuff");
 }
 
@@ -108,7 +112,11 @@ async fn workday_live() {
 async fn smartrecruiters_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("visa", Ats::SmartRecruiters, "Visa");
-    let postings = SmartRecruitersAdapter.list(&http, &board).await.unwrap();
+    let postings = SmartRecruitersAdapter
+        .list(&http, &board)
+        .await
+        .unwrap()
+        .postings;
     assert_well_formed(&postings, "Visa");
 }
 
@@ -117,7 +125,7 @@ async fn smartrecruiters_live() {
 async fn rippling_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("rippling", Ats::Rippling, "rippling");
-    let postings = RipplingAdapter.list(&http, &board).await.unwrap();
+    let postings = RipplingAdapter.list(&http, &board).await.unwrap().postings;
     assert_well_formed(&postings, "rippling");
     // Exercise the __NEXT_DATA__ detail path against a real job page.
     let detail = RipplingAdapter
@@ -132,7 +140,11 @@ async fn rippling_live() {
 async fn github_careers_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("github", Ats::GithubCareers, "github");
-    let postings = GithubCareersAdapter.list(&http, &board).await.unwrap();
+    let postings = GithubCareersAdapter
+        .list(&http, &board)
+        .await
+        .unwrap()
+        .postings;
     assert_well_formed(&postings, "github");
 }
 
@@ -141,7 +153,7 @@ async fn github_careers_live() {
 async fn workable_live() {
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let board = board("futureplc", Ats::Workable, "futureplc");
-    let postings = WorkableAdapter.list(&http, &board).await.unwrap();
+    let postings = WorkableAdapter.list(&http, &board).await.unwrap().postings;
     assert_well_formed(&postings, "futureplc");
     let detail = WorkableAdapter
         .detail(&http, &board, &postings[0].req_id)

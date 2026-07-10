@@ -16,7 +16,7 @@
 use serde::Deserialize;
 
 use super::parse;
-use super::{Adapter, AdapterError};
+use super::{Adapter, AdapterError, ListResult};
 use crate::config::BoardConfig;
 use crate::http::{FetchCtx, HttpClient};
 use crate::model::{
@@ -128,7 +128,7 @@ impl Adapter for GithubCareersAdapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> Result<Vec<Posting>, AdapterError> {
+    ) -> Result<ListResult, AdapterError> {
         let mut postings = Vec::new();
         let mut page: i64 = 1;
         loop {
@@ -150,7 +150,7 @@ impl Adapter for GithubCareersAdapter {
                 break;
             }
         }
-        Ok(postings)
+        Ok(postings.into())
     }
 
     async fn detail(

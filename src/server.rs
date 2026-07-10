@@ -123,6 +123,11 @@ struct FetchBoardResponse {
     board_id: String,
     snapshot_id: i64,
     posting_count: usize,
+    /// Non-fatal notes from this fetch: stub postings skipped mid-publish, or a board
+    /// that went non-empty → empty (a possible migration). Empty when there's nothing to
+    /// flag. Surfaced here because an MCP client never sees the server's stderr log.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
     /// Present only when `full` was set on the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     postings: Option<Vec<Value>>,
@@ -225,20 +230,45 @@ impl JobBoardServer {
         let board = self.board(&args.board_id)?;
         // Only a successful fetch reaches record_snapshot — the invariant that a
         // maintenance-mode board is never recorded as empty and DEAD.
-        let postings = adapter::list_for(&self.inner.http, board)
+        let result = adapter::list_for(&self.inner.http, board)
             .await
             .map_err(adapter_err)?;
+        // Read the prior count BEFORE recording overwrites it — the migration signal.
+        let prev_count = self
+            .inner
+            .store
+            .previous_posting_count(&board.id)
+            .await
+            .map_err(store_err)?;
+        let postings = result.postings;
         let snapshot_id = self
             .inner
             .store
             .record_snapshot(&board.id, clock::now(), &postings)
             .await
             .map_err(store_err)?;
+
+        let mut warnings = Vec::new();
+        if !result.skipped.is_empty() {
+            warnings.push(format!(
+                "{} posting(s) skipped mid-publish (no title/path yet): {}",
+                result.skipped.len(),
+                result.skipped.join(", ")
+            ));
+        }
+        if postings.is_empty() && prev_count.unwrap_or(0) > 0 {
+            warnings.push(format!(
+                "board returned 0 postings after a snapshot of {} — possible migration off this ATS",
+                prev_count.unwrap_or(0)
+            ));
+        }
+
         let postings_echo = args.full.then(|| postings.iter().map(to_value).collect());
         Ok(Json(FetchBoardResponse {
             board_id: board.id.to_string(),
             snapshot_id,
             posting_count: postings.len(),
+            warnings,
             postings: postings_echo,
         }))
     }

@@ -108,6 +108,7 @@ struct StoredMaterial {
     locations: String,
     workplace_type: String,
     comp: String,
+    equity: String,
 }
 
 /// Which material fields moved between the stored posting and the incoming one. `url`,
@@ -127,6 +128,9 @@ fn changed_fields(old: &StoredMaterial, new: &Posting) -> Vec<String> {
     }
     if old.comp != json(&new.comp) {
         fields.push("comp".to_owned());
+    }
+    if old.equity != json(&new.equity) {
+        fields.push("equity".to_owned());
     }
     if fields.is_empty() && old.content_hash != new.content_hash.to_hex() {
         fields.push("description".to_owned());
@@ -198,6 +202,25 @@ impl Store {
         Ok(row.taken)
     }
 
+    /// The posting_count of the most recent snapshot for a board, or `None` if it has
+    /// never been snapshotted. Read at the tool layer BEFORE a new snapshot is recorded,
+    /// this powers the non-empty → empty (possible migration) warning `fetch_board`
+    /// surfaces — the store stays clock-free and opinion-free; the tool decides.
+    pub async fn previous_posting_count(
+        &self,
+        board_id: &BoardId,
+    ) -> Result<Option<i64>, StoreError> {
+        let board = board_id.as_str();
+        let row = sqlx::query!(
+            "SELECT posting_count FROM snapshots WHERE board_id = ?1 ORDER BY id DESC LIMIT 1",
+            board,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        Ok(row.map(|r| r.posting_count))
+    }
+
     /// Mirror a config board into the store so snapshots and postings have something to
     /// reference. The config file stays the source of truth; this refreshes the mirror.
     pub async fn upsert_board(&self, board: &BoardConfig) -> Result<(), StoreError> {
@@ -244,30 +267,6 @@ impl Store {
         let taken = taken_at.to_rfc3339();
         let count = postings.len() as i64;
 
-        // A board that HAD postings and is now empty is the silent-migration shape: Lever
-        // and Workable return 200 + [] when a company moves off, indistinguishable from a
-        // genuinely-empty board. We still record it (an empty board is legitimate), but
-        // warn — the drop from non-empty to empty is exactly the maintenance-mode signal
-        // worth a human's eyes.
-        if count == 0 {
-            let prev = sqlx::query!(
-                "SELECT posting_count FROM snapshots WHERE board_id = ?1 ORDER BY id DESC LIMIT 1",
-                board,
-            )
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(StoreError::Write)?;
-            if let Some(row) = prev {
-                if row.posting_count > 0 {
-                    tracing::warn!(
-                        board = %board_id,
-                        previous = row.posting_count,
-                        "board returned zero postings after a non-empty snapshot — possible migration off this ATS"
-                    );
-                }
-            }
-        }
-
         let mut tx = self.pool.begin().await.map_err(StoreError::Write)?;
 
         let snapshot_id = sqlx::query!(
@@ -286,7 +285,7 @@ impl Store {
         // The previous fetch's state, read BEFORE the upsert overwrites it — this is what
         // NEW vs CHANGED is measured against.
         let stored: HashMap<String, StoredMaterial> = sqlx::query!(
-            "SELECT req_id, content_hash, title, locations, workplace_type, comp
+            "SELECT req_id, content_hash, title, locations, workplace_type, comp, equity
              FROM postings WHERE board_id = ?1",
             board,
         )
@@ -303,6 +302,7 @@ impl Store {
                     locations: r.locations,
                     workplace_type: r.workplace_type,
                     comp: r.comp,
+                    equity: r.equity,
                 },
             )
         })
@@ -313,6 +313,7 @@ impl Store {
             let locations = json(&posting.locations);
             let workplace_type = json(&posting.workplace_type);
             let comp = json(&posting.comp);
+            let equity = json(&posting.equity);
             let content_hash = posting.content_hash.to_hex();
             let posted_at = posting.posted_at.map(|d| d.to_rfc3339());
             let updated_at = posting.updated_at.map(|d| d.to_rfc3339());
@@ -346,8 +347,8 @@ impl Store {
                 "INSERT INTO postings (
                      board_id, req_id, first_seen, last_seen, title, url, locations,
                      workplace_type, remote_scope, comp, posted_at, updated_at,
-                     updated_at_unreliable, department, employment_type, content_hash)
-                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                     updated_at_unreliable, department, employment_type, content_hash, equity)
+                 VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
                  ON CONFLICT (board_id, req_id) DO UPDATE SET
                      last_seen = excluded.last_seen,
                      title = excluded.title,
@@ -361,7 +362,8 @@ impl Store {
                      updated_at_unreliable = excluded.updated_at_unreliable,
                      department = excluded.department,
                      employment_type = excluded.employment_type,
-                     content_hash = excluded.content_hash",
+                     content_hash = excluded.content_hash,
+                     equity = excluded.equity",
                 board,
                 req_id,
                 taken,
@@ -377,6 +379,7 @@ impl Store {
                 posting.department,
                 posting.employment_type,
                 content_hash,
+                equity,
             )
             .execute(&mut *tx)
             .await
@@ -584,7 +587,7 @@ impl Store {
         let filter = board_id.map(BoardId::as_str);
         let rows = sqlx::query!(
             r#"SELECT id AS "id!", board_id, ats, url, method, status,
-                      captured_at, LENGTH(body) AS "bytes!: i64"
+                      captured_at, length(CAST(body AS BLOB)) AS "bytes!: i64"
                FROM raw_captures
                WHERE ?1 IS NULL OR board_id = ?1
                ORDER BY captured_at DESC, id DESC
@@ -993,5 +996,102 @@ mod tests {
             .unwrap();
         assert_eq!(store.list_captures(Some(&a), 100).await.unwrap().len(), 1);
         assert_eq!(store.list_captures(None, 100).await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn previous_posting_count_reads_the_last_snapshot() {
+        // None before any snapshot; then the most recent count — what fetch_board reads to
+        // flag a non-empty → empty (possible migration) transition.
+        let (store, id) = seeded().await;
+        assert_eq!(store.previous_posting_count(&id).await.unwrap(), None);
+        store
+            .record_snapshot(&id, day(0), &[posting("1", "Eng"), posting("2", "Des")])
+            .await
+            .unwrap();
+        assert_eq!(store.previous_posting_count(&id).await.unwrap(), Some(2));
+    }
+
+    #[tokio::test]
+    async fn capture_bytes_counts_utf8_bytes_not_chars() {
+        let store = Store::open_in_memory().await.unwrap();
+        let id = BoardId::new("gitlab");
+        // café—€ : é is 2 bytes, — is 3, € is 3, so bytes > chars.
+        let body = "café—€";
+        assert!(
+            body.len() > body.chars().count(),
+            "test body must be multibyte"
+        );
+        store
+            .record_capture(&cap(&id, body), day(0), 7)
+            .await
+            .unwrap();
+        let metas = store.list_captures(None, 10).await.unwrap();
+        assert_eq!(metas[0].bytes, body.len() as i64);
+    }
+
+    fn posting_with_equity(req: &str, title: &str, equity: Equity) -> Posting {
+        let mut p = posting(req, title);
+        // Recompute the hash WITH the equity so a change to it actually moves the hash —
+        // that's what triggers a version row and lets changed_fields run.
+        p.content_hash = content_hash(
+            title,
+            &["Remote".to_owned()],
+            WorkplaceType::Remote,
+            &Comp::None,
+            equity,
+            "",
+        );
+        p.equity = equity;
+        p
+    }
+
+    #[tokio::test]
+    async fn equity_is_persisted_to_its_column() {
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(
+                &id,
+                day(0),
+                &[posting_with_equity("1", "Eng", Equity::Offered)],
+            )
+            .await
+            .unwrap();
+        let row = sqlx::query!("SELECT equity FROM postings WHERE req_id = '1'")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(row.equity, r#"{"kind":"offered"}"#);
+    }
+
+    #[tokio::test]
+    async fn an_equity_change_is_named_equity_not_description() {
+        // The dogfood defect: equity feeds the hash but wasn't stored or compared, so an
+        // equity move fell through to "description" by elimination. Now it's named.
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(
+                &id,
+                day(0),
+                &[posting_with_equity("1", "Eng", Equity::None)],
+            )
+            .await
+            .unwrap();
+        // Only equity moves: None → Offered, title/locations/comp/description all identical.
+        store
+            .record_snapshot(
+                &id,
+                day(1),
+                &[posting_with_equity("1", "Eng", Equity::Offered)],
+            )
+            .await
+            .unwrap();
+        let diff = store.diff_board(&id).await.unwrap();
+        assert_eq!(
+            diff.changed,
+            vec![ChangedPosting {
+                req_id: ReqId::new("1"),
+                changed_fields: vec!["equity".to_owned()],
+            }]
+        );
     }
 }

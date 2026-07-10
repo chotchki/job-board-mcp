@@ -74,6 +74,28 @@ impl AdapterError {
     }
 }
 
+/// The outcome of an adapter `list`: the normalized postings, plus any entries the
+/// adapter deliberately SKIPPED rather than failed on. Workday emits title-less stubs for
+/// postings mid-publish (`{"bulletFields":["10151065"]}` with no title or path), and one
+/// stub must not sink the whole fetch — so it's skipped, its req_id recorded here, and the
+/// tool layer surfaces it. A skipped req is one being touched at fetch time, often a NEW
+/// about to land, so it's signal, not noise.
+#[derive(Debug, Default)]
+pub struct ListResult {
+    pub postings: Vec<Posting>,
+    pub skipped: Vec<String>,
+}
+
+impl From<Vec<Posting>> for ListResult {
+    /// The common case: an adapter that skips nothing hands its postings straight through.
+    fn from(postings: Vec<Posting>) -> Self {
+        Self {
+            postings,
+            skipped: Vec::new(),
+        }
+    }
+}
+
 /// Remap a 404 from a PER-POSTING endpoint (the req doesn't exist) to
 /// [`PostingNotFound`](AdapterError::PostingNotFound); pass every other failure through.
 /// The board is fine — only the req is bad — so the caller shouldn't be sent to the config.
@@ -92,10 +114,7 @@ pub(crate) fn not_found_on_404(err: AdapterError, req_id: &ReqId) -> AdapterErro
 /// Fetch a board's listing through the adapter for its ATS. This `match` is the whole
 /// dispatch — and because `Ats` is closed, a wave-2 platform can't be added without the
 /// compiler forcing a new arm here.
-pub async fn list_for(
-    http: &HttpClient,
-    board: &BoardConfig,
-) -> Result<Vec<Posting>, AdapterError> {
+pub async fn list_for(http: &HttpClient, board: &BoardConfig) -> Result<ListResult, AdapterError> {
     match board.ats {
         Ats::Greenhouse => GreenhouseAdapter.list(http, board).await,
         Ats::Ashby => AshbyAdapter.list(http, board).await,
@@ -134,7 +153,7 @@ pub trait Adapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> impl Future<Output = Result<Vec<Posting>, AdapterError>> + Send;
+    ) -> impl Future<Output = Result<ListResult, AdapterError>> + Send;
 
     /// Fetch one posting's full detail, including description text, for JD capture at
     /// apply time.
@@ -160,7 +179,7 @@ mod tests {
             &self,
             _http: &HttpClient,
             board: &BoardConfig,
-        ) -> Result<Vec<Posting>, AdapterError> {
+        ) -> Result<ListResult, AdapterError> {
             Ok(vec![Posting {
                 ats: board.ats,
                 board_id: board.id.clone(),
@@ -178,7 +197,8 @@ mod tests {
                 department: None,
                 employment_type: None,
                 content_hash: ContentHash::from_bytes([0; 32]),
-            }])
+            }]
+            .into())
         }
 
         async fn detail(
@@ -207,12 +227,13 @@ mod tests {
     async fn trait_is_implementable_and_futures_are_send() {
         // Spawning forces the future to be Send — a compile-time proof of the bound.
         let http = crate::http::HttpClient::new(crate::http::HttpConfig::default()).unwrap();
-        let postings = tokio::spawn(async move { StubAdapter.list(&http, &board()).await })
+        let result = tokio::spawn(async move { StubAdapter.list(&http, &board()).await })
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(postings.len(), 1);
-        assert_eq!(postings[0].title, "Engineer");
+        assert_eq!(result.postings.len(), 1);
+        assert_eq!(result.postings[0].title, "Engineer");
+        assert!(result.skipped.is_empty());
     }
 
     #[test]

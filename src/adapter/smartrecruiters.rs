@@ -8,7 +8,7 @@
 use serde::Deserialize;
 
 use super::parse;
-use super::{Adapter, AdapterError};
+use super::{Adapter, AdapterError, ListResult};
 use crate::config::BoardConfig;
 use crate::http::{FetchCtx, HttpClient};
 use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
@@ -155,7 +155,7 @@ impl Adapter for SmartRecruitersAdapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> Result<Vec<Posting>, AdapterError> {
+    ) -> Result<ListResult, AdapterError> {
         let token = board.token.as_str();
         let mut postings = Vec::new();
         let mut offset: i64 = 0;
@@ -178,7 +178,7 @@ impl Adapter for SmartRecruitersAdapter {
                 break;
             }
         }
-        Ok(postings)
+        Ok(postings.into())
     }
 
     async fn detail(

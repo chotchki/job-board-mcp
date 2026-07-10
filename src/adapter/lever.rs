@@ -11,7 +11,7 @@
 use serde::Deserialize;
 
 use super::parse;
-use super::{Adapter, AdapterError};
+use super::{Adapter, AdapterError, ListResult};
 use crate::config::BoardConfig;
 use crate::http::{FetchCtx, HttpClient};
 use crate::model::{
@@ -143,14 +143,14 @@ impl Adapter for LeverAdapter {
         &self,
         http: &HttpClient,
         board: &BoardConfig,
-    ) -> Result<Vec<Posting>, AdapterError> {
+    ) -> Result<ListResult, AdapterError> {
         let body = http
             .get_text(
                 &Self::list_url(board.token.as_str()),
                 &FetchCtx::from_board(board),
             )
             .await?;
-        Self::parse_postings(&body, board)
+        Ok(Self::parse_postings(&body, board)?.into())
     }
 
     async fn detail(
