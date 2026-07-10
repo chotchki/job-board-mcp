@@ -16,6 +16,8 @@ pub enum Ats {
     Ashby,
     Lever,
     Workday,
+    #[serde(rename = "smartrecruiters")]
+    SmartRecruiters,
 }
 
 /// Where the work happens. `Unknown` is the honest default for a board that doesn't

@@ -13,11 +13,13 @@ mod ashby;
 mod greenhouse;
 mod lever;
 mod parse;
+mod smartrecruiters;
 mod workday;
 
 pub use ashby::AshbyAdapter;
 pub use greenhouse::GreenhouseAdapter;
 pub use lever::LeverAdapter;
+pub use smartrecruiters::SmartRecruitersAdapter;
 pub use workday::WorkdayAdapter;
 
 /// Why an adapter call failed. Every variant is loud and typed — especially
@@ -75,6 +77,7 @@ pub async fn list_for(
         Ats::Ashby => AshbyAdapter.list(http, board).await,
         Ats::Lever => LeverAdapter.list(http, board).await,
         Ats::Workday => WorkdayAdapter.list(http, board).await,
+        Ats::SmartRecruiters => SmartRecruitersAdapter.list(http, board).await,
     }
 }
 
@@ -89,6 +92,7 @@ pub async fn detail_for(
         Ats::Ashby => AshbyAdapter.detail(http, board, req_id).await,
         Ats::Lever => LeverAdapter.detail(http, board, req_id).await,
         Ats::Workday => WorkdayAdapter.detail(http, board, req_id).await,
+        Ats::SmartRecruiters => SmartRecruitersAdapter.detail(http, board, req_id).await,
     }
 }
 

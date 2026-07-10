@@ -1,0 +1,57 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 2,
+  "content": [
+    {
+      "id": "744000133907678",
+      "name": "Sr. Manager",
+      "refNumber": "REF97395W",
+      "releasedDate": "2026-06-24T10:00:11.853Z",
+      "location": {
+        "city": "Austin",
+        "region": "TX",
+        "country": "us",
+        "remote": false,
+        "hybrid": false,
+        "latitude": "30.267153",
+        "longitude": "-97.7430608",
+        "fullLocation": "Austin, TX, United States"
+      },
+      "department": {
+        "id": "868639",
+        "label": "Software Development/Engineering"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "ref": "https://api.smartrecruiters.com/v1/companies/Visa/postings/744000133907678"
+    },
+    {
+      "id": "744000129971988",
+      "name": "Director",
+      "refNumber": "REF97388Z",
+      "releasedDate": "2026-06-03T11:08:12.368Z",
+      "location": {
+        "city": "Bengaluru",
+        "region": "KA",
+        "country": "in",
+        "remote": false,
+        "hybrid": false,
+        "latitude": "12.9628957",
+        "longitude": "77.57754",
+        "fullLocation": "Bengaluru, KA, India"
+      },
+      "department": {
+        "id": "1146555",
+        "label": "Cyber Security"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "ref": "https://api.smartrecruiters.com/v1/companies/Visa/postings/744000129971988"
+    }
+  ]
+}

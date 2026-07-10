@@ -10,7 +10,9 @@
 //! The boards (gitlab / ramp / gopuff) are large and stable, but they're third parties:
 //! if one empties out, that's worth knowing too (it likely moved off the ATS).
 
-use job_board_mcp::adapter::{Adapter, AshbyAdapter, GreenhouseAdapter, LeverAdapter};
+use job_board_mcp::adapter::{
+    Adapter, AshbyAdapter, GreenhouseAdapter, LeverAdapter, SmartRecruitersAdapter,
+};
 use job_board_mcp::config::BoardConfig;
 use job_board_mcp::http::{HttpClient, HttpConfig};
 use job_board_mcp::model::{Ats, AtsToken, BoardId, Posting};
@@ -93,4 +95,13 @@ async fn workday_live() {
     for marker in ["jobPostings", "bulletFields", "externalPath", "title"] {
         assert!(body.contains(marker), "workday response missing {marker}");
     }
+}
+
+#[tokio::test]
+#[ignore = "hits the live smartrecruiters API; run with --ignored"]
+async fn smartrecruiters_live() {
+    let http = HttpClient::new(HttpConfig::default()).unwrap();
+    let board = board("visa", Ats::SmartRecruiters, "Visa");
+    let postings = SmartRecruitersAdapter.list(&http, &board).await.unwrap();
+    assert_well_formed(&postings, "Visa");
 }

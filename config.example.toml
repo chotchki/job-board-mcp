@@ -30,3 +30,8 @@ id = "nvidia"
 ats = "workday"
 token = "nvidia.wd5.myworkdayjobs.com"
 site = "NVIDIAExternalCareerSite"
+
+[[board]]
+id = "example-on-smartrecruiters"
+ats = "smartrecruiters"
+token = "Visa"           # the company identifier (case-sensitive)
