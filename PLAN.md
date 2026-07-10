@@ -11,8 +11,8 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 -->
 
 ## Phase E - MCP surface + v0.1
-- [ ] E.1 - expose tools: list_boards, fetch_board, fetch_posting, diff_boards, mark_obit, list_obits
-- [ ] E.2 - end-to-end test driving the stdio server from an MCP client harness
+- [x] E.1 - expose tools: list_boards, fetch_board, fetch_posting, diff_boards, mark_obit, list_obits
+- [x] E.2 - end-to-end test driving the stdio server from an MCP client harness
 - [ ] E.3 - README: install, config schema, tool reference, the quirk table (lifted from SPEC)
 - [ ] E.4 - tag v0.1.0
 

@@ -42,6 +42,7 @@ allow_attributes = "warn"
 [dev-dependencies]
 rmcp = { version = "2.2.0", features = ["client", "transport-child-process"] }
 tokio = { version = "1", features = ["full"] }
+toml = "0.8"
 wiremock = "0.6.5"
 
 [build-dependencies]
