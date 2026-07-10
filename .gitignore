@@ -5,3 +5,6 @@
 
 # the real board list is private by nature; only config.example.toml ships
 /config.toml
+
+# build.rs writes an absolute DATABASE_URL here
+.env
