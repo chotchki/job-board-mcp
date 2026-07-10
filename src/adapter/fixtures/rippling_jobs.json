@@ -1,28 +1,41 @@
 [
   {
-    "uuid": "2f0674e6-f01f-4ecd-b459-e947241c211f",
-    "name": "Account Executive - Accountants Channel (East Coast)",
+    "uuid": "2750c304-5e66-40a5-a073-cf717c425415",
+    "name": "Customer Support Specialist, Enrollments",
     "department": {
-      "id": "Sales",
-      "label": "Sales"
+      "id": "Customer Support",
+      "label": "Customer Support"
     },
-    "url": "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "url": "https://ats.rippling.com/rippling/jobs/2750c304-5e66-40a5-a073-cf717c425415",
     "workLocation": {
-      "label": "New York, NY",
-      "id": "New York, NY"
+      "label": "Remote (Oregon, US)",
+      "id": "Remote (Oregon, US)"
     }
   },
   {
-    "uuid": "2f0674e6-f01f-4ecd-b459-e947241c211f",
-    "name": "Account Executive - Accountants Channel (East Coast)",
+    "uuid": "2750c304-5e66-40a5-a073-cf717c425415",
+    "name": "Customer Support Specialist, Enrollments",
+    "department": {
+      "id": "Customer Support",
+      "label": "Customer Support"
+    },
+    "url": "https://ats.rippling.com/rippling/jobs/2750c304-5e66-40a5-a073-cf717c425415",
+    "workLocation": {
+      "label": "Remote (El Paso, Texas, US)",
+      "id": "Remote (El Paso, Texas, US)"
+    }
+  },
+  {
+    "uuid": "94ac7084-9b63-4e9f-9e2a-fd5da349172d",
+    "name": "Account Executive, Broker Channel (Atlanta) ",
     "department": {
       "id": "Sales",
       "label": "Sales"
     },
-    "url": "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "url": "https://ats.rippling.com/rippling/jobs/94ac7084-9b63-4e9f-9e2a-fd5da349172d",
     "workLocation": {
-      "label": "Remote (Massachusetts, US)",
-      "id": "Remote (Massachusetts, US)"
+      "label": "Remote (Atlanta, Georgia, US)",
+      "id": "Remote (Atlanta, Georgia, US)"
     }
   }
 ]

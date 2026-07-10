@@ -182,9 +182,10 @@ impl WorkdayAdapter {
             employment_type: info.time_type,
             content_hash: hash,
         };
+        let description_html = info.job_description;
         Ok(PostingDetail {
-            description_html: info.job_description,
-            description_text: None,
+            description_text: description_html.as_deref().map(parse::strip_tags),
+            description_html,
             posting,
         })
     }

@@ -79,15 +79,41 @@ impl RipplingAdapter {
     fn parse_feed(body: &str, board: &BoardConfig) -> Result<Vec<Posting>, AdapterError> {
         let jobs: Vec<FeedJob> = serde_json::from_str(body)
             .map_err(|e| AdapterError::drift("rippling jobs feed", e.to_string()))?;
-        Ok(jobs
+
+        // The feed emits ONE ROW PER (job × workLocation) — a multi-location req appears
+        // many times. Group by uuid so a posting is one req with all its locations merged,
+        // in first-seen order, rather than N duplicate rows that inflate the count and let
+        // the store's last-write-wins silently drop locations.
+        let mut order: Vec<String> = Vec::new();
+        let mut merged: std::collections::HashMap<String, (FeedJob, Vec<String>)> =
+            std::collections::HashMap::new();
+        for job in jobs {
+            let location = job.work_location.as_ref().and_then(|l| l.label.clone());
+            match merged.get_mut(&job.uuid) {
+                Some((_, locations)) => {
+                    if let Some(l) = location {
+                        if !locations.contains(&l) {
+                            locations.push(l);
+                        }
+                    }
+                }
+                None => {
+                    order.push(job.uuid.clone());
+                    merged.insert(job.uuid.clone(), (job, location.into_iter().collect()));
+                }
+            }
+        }
+
+        Ok(order
             .into_iter()
-            .map(|j| Self::to_posting(j, board))
+            .map(|uuid| {
+                let (job, locations) = merged.remove(&uuid).expect("uuid was inserted");
+                Self::to_posting(job, locations, board)
+            })
             .collect())
     }
 
-    fn to_posting(job: FeedJob, board: &BoardConfig) -> Posting {
-        let location = job.work_location.and_then(|l| l.label);
-        let locations: Vec<String> = location.into_iter().collect();
+    fn to_posting(job: FeedJob, locations: Vec<String>, board: &BoardConfig) -> Posting {
         let workplace_type = infer_workplace(&locations);
         let comp = Comp::None;
         let hash = content_hash(&job.name, &locations, workplace_type, &comp, "");
@@ -150,8 +176,8 @@ impl RipplingAdapter {
         };
         Ok(PostingDetail {
             posting,
+            description_text: description_html.as_deref().map(parse::strip_tags),
             description_html,
-            description_text: None,
         })
     }
 }
@@ -241,21 +267,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_real_feed() {
+    fn feed_rows_are_grouped_by_uuid_with_locations_merged() {
+        // The fixture is 3 feed rows: two for one uuid (different locations) + one other.
+        // They must collapse to 2 postings, the first carrying BOTH its locations — not
+        // 3 rows, and not a location silently dropped.
         let postings =
             RipplingAdapter::parse_feed(include_str!("fixtures/rippling_jobs.json"), &board())
                 .unwrap();
         assert_eq!(postings.len(), 2);
         let p = &postings[0];
         assert_eq!(p.ats, Ats::Rippling);
-        assert_eq!(p.req_id, ReqId::new("2f0674e6-f01f-4ecd-b459-e947241c211f"));
-        assert!(p.title.starts_with("Account Executive"));
+        assert_eq!(p.req_id, ReqId::new("2750c304-5e66-40a5-a073-cf717c425415"));
         assert_eq!(
-            p.url,
-            "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f"
+            p.locations,
+            vec![
+                "Remote (Oregon, US)".to_owned(),
+                "Remote (El Paso, Texas, US)".to_owned(),
+            ]
         );
-        assert_eq!(p.locations, vec!["New York, NY".to_owned()]);
-        assert_eq!(p.department.as_deref(), Some("Sales"));
+        assert_eq!(p.workplace_type, WorkplaceType::Remote);
         assert_eq!(p.posted_at, None); // feed has no date
     }
 

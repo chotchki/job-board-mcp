@@ -194,10 +194,11 @@ impl Adapter for SmartRecruitersAdapter {
         if let Some(url) = detail.posting_url {
             posting.url = url;
         }
+        let description_html = (!description_html.is_empty()).then_some(description_html);
         Ok(PostingDetail {
             posting,
-            description_html: (!description_html.is_empty()).then_some(description_html),
-            description_text: None,
+            description_text: description_html.as_deref().map(parse::strip_tags),
+            description_html,
         })
     }
 }

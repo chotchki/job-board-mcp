@@ -16,6 +16,7 @@ mod lever;
 mod parse;
 mod rippling;
 mod smartrecruiters;
+mod workable;
 mod workday;
 
 pub use ashby::AshbyAdapter;
@@ -24,6 +25,7 @@ pub use greenhouse::GreenhouseAdapter;
 pub use lever::LeverAdapter;
 pub use rippling::RipplingAdapter;
 pub use smartrecruiters::SmartRecruitersAdapter;
+pub use workable::WorkableAdapter;
 pub use workday::WorkdayAdapter;
 
 /// Why an adapter call failed. Every variant is loud and typed — especially
@@ -84,6 +86,7 @@ pub async fn list_for(
         Ats::SmartRecruiters => SmartRecruitersAdapter.list(http, board).await,
         Ats::Rippling => RipplingAdapter.list(http, board).await,
         Ats::GithubCareers => GithubCareersAdapter.list(http, board).await,
+        Ats::Workable => WorkableAdapter.list(http, board).await,
     }
 }
 
@@ -101,6 +104,7 @@ pub async fn detail_for(
         Ats::SmartRecruiters => SmartRecruitersAdapter.detail(http, board, req_id).await,
         Ats::Rippling => RipplingAdapter.detail(http, board, req_id).await,
         Ats::GithubCareers => GithubCareersAdapter.detail(http, board, req_id).await,
+        Ats::Workable => WorkableAdapter.detail(http, board, req_id).await,
     }
 }
 

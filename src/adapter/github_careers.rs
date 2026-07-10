@@ -155,8 +155,8 @@ impl Adapter for GithubCareersAdapter {
                     let posting = Self::to_posting(job.data, board)?;
                     return Ok(PostingDetail {
                         posting,
+                        description_text: description_html.as_deref().map(parse::strip_tags),
                         description_html,
-                        description_text: None,
                     });
                 }
             }

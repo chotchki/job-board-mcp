@@ -12,7 +12,7 @@
 
 use job_board_mcp::adapter::{
     Adapter, AshbyAdapter, GithubCareersAdapter, GreenhouseAdapter, LeverAdapter, RipplingAdapter,
-    SmartRecruitersAdapter,
+    SmartRecruitersAdapter, WorkableAdapter,
 };
 use job_board_mcp::config::BoardConfig;
 use job_board_mcp::http::{HttpClient, HttpConfig};
@@ -129,4 +129,18 @@ async fn github_careers_live() {
     let board = board("github", Ats::GithubCareers, "github");
     let postings = GithubCareersAdapter.list(&http, &board).await.unwrap();
     assert_well_formed(&postings, "github");
+}
+
+#[tokio::test]
+#[ignore = "hits the live workable API; run with --ignored"]
+async fn workable_live() {
+    let http = HttpClient::new(HttpConfig::default()).unwrap();
+    let board = board("futureplc", Ats::Workable, "futureplc");
+    let postings = WorkableAdapter.list(&http, &board).await.unwrap();
+    assert_well_formed(&postings, "futureplc");
+    let detail = WorkableAdapter
+        .detail(&http, &board, &postings[0].req_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.posting.req_id, postings[0].req_id);
 }

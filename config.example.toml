@@ -46,3 +46,8 @@ token = "rippling"          # the board slug in ats.rippling.com/{slug}
 id = "github"
 ats = "github_careers"
 token = "github"
+
+[[board]]
+id = "futureplc"
+ats = "workable"
+token = "futureplc"         # the account slug in apply.workable.com/{slug}

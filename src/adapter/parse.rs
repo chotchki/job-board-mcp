@@ -26,6 +26,23 @@ pub(crate) fn epoch_millis(value: Option<i64>) -> Option<DateTime<Utc>> {
     value.and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
+/// Strip HTML tags to plain text and collapse whitespace — for a `description_text`
+/// beside a `description_html`. Deliberately dumb (no entity decoding, no nesting); it's
+/// a readable-text approximation, not a sanitizer.
+pub(crate) fn strip_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Like [`rfc3339`], but also accepts a numeric offset written without a colon (`+0000`),
 /// which github.careers emits. Present-but-unparseable is drift; absent is `None`.
 pub(crate) fn datetime_lenient(

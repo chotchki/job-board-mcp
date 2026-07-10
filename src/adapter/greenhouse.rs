@@ -81,7 +81,7 @@ impl GreenhouseAdapter {
         let job: Job = serde_json::from_str(body)
             .map_err(|e| AdapterError::drift("greenhouse job detail", e.to_string()))?;
         let description_html = job.content.clone().map(|c| unescape_html(&c));
-        let description_text = description_html.as_deref().map(strip_tags);
+        let description_text = description_html.as_deref().map(super::parse::strip_tags);
         let posting = Self::to_posting(job, board)?;
         Ok(PostingDetail {
             posting,
@@ -155,20 +155,6 @@ fn unescape_html(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&amp;", "&")
-}
-
-fn strip_tags(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
-        }
-    }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn infer_workplace(location: Option<&str>) -> WorkplaceType {

@@ -1,0 +1,69 @@
+{
+  "total": 19,
+  "results": [
+    {
+      "shortcode": "40D624356F",
+      "title": "Advertising Sales Manager - The Week",
+      "remote": false,
+      "location": {
+        "country": "United Kingdom",
+        "countryCode": "GB",
+        "city": "London",
+        "region": "England"
+      },
+      "locations": [
+        {
+          "country": "United Kingdom",
+          "countryCode": "GB",
+          "city": "London",
+          "region": "England",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "code": "FVAC1820",
+      "published": "2026-07-09T00:00:00.000Z",
+      "type": "full",
+      "department": [
+        "Revenue - Commercial"
+      ],
+      "workplace": "hybrid"
+    },
+    {
+      "shortcode": "0C34F15516",
+      "title": "SEO & GEO Account Manager",
+      "remote": false,
+      "location": {
+        "country": "United Kingdom",
+        "countryCode": "GB",
+        "city": "Cardiff",
+        "region": "Wales"
+      },
+      "locations": [
+        {
+          "country": "United Kingdom",
+          "countryCode": "GB",
+          "city": "Cardiff",
+          "region": "Wales",
+          "hidden": false
+        },
+        {
+          "country": "United Kingdom",
+          "countryCode": "GB",
+          "city": "Bath",
+          "region": "England",
+          "hidden": false
+        }
+      ],
+      "state": "published",
+      "code": "FVAC1835",
+      "published": "2026-07-09T00:00:00.000Z",
+      "type": "full",
+      "department": [
+        "B2C"
+      ],
+      "workplace": "hybrid"
+    }
+  ],
+  "nextPage": null
+}
