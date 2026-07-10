@@ -342,7 +342,8 @@ impl Store {
         let new = sqlx::query!(
             "SELECT req_id FROM postings
              WHERE board_id = ?1 AND first_seen = ?2
-               AND req_id NOT IN (SELECT key FROM obits WHERE board_id = ?1)",
+               AND req_id NOT IN (SELECT key FROM obits WHERE board_id = ?1)
+             ORDER BY req_id",
             board,
             latest_taken,
         )
@@ -357,7 +358,8 @@ impl Store {
             "SELECT v.req_id AS req_id, v.changed_fields AS changed_fields
              FROM posting_versions v
              JOIN snapshots s ON s.id = v.snapshot_id
-             WHERE s.board_id = ?1 AND s.taken_at = ?2",
+             WHERE s.board_id = ?1 AND s.taken_at = ?2
+             ORDER BY v.req_id",
             board,
             latest_taken,
         )
@@ -375,7 +377,8 @@ impl Store {
         let dead = match prev_taken {
             None => Vec::new(),
             Some(prev) => sqlx::query!(
-                "SELECT req_id FROM postings WHERE board_id = ?1 AND last_seen = ?2",
+                "SELECT req_id FROM postings WHERE board_id = ?1 AND last_seen = ?2
+                 ORDER BY req_id",
                 board,
                 prev,
             )
