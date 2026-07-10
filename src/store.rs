@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::config::BoardConfig;
-use crate::model::{BoardId, Posting, ReqId};
+use crate::model::{BoardId, ObitKind, Posting, ReqId};
 
 /// Things that go wrong opening, migrating, or writing the store.
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +49,16 @@ pub struct BoardDiff {
 pub struct ChangedPosting {
     pub req_id: ReqId,
     pub changed_fields: Vec<String>,
+}
+
+/// One row of the obit ledger.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ObitRecord {
+    pub board_id: BoardId,
+    pub key: String,
+    pub kind: ObitKind,
+    pub reason: String,
+    pub marked_at: String,
 }
 
 /// The stored material fields of a posting, as strings, for change detection. Comparing
@@ -327,8 +337,12 @@ impl Store {
         let latest_taken = latest.taken_at.clone();
         let prev_taken = snaps.get(1).map(|s| s.taken_at.clone());
 
+        // NEW excludes anything in the obit ledger — a ghost aggregator listing or a
+        // rejected req must not re-surface as new.
         let new = sqlx::query!(
-            "SELECT req_id FROM postings WHERE board_id = ?1 AND first_seen = ?2",
+            "SELECT req_id FROM postings
+             WHERE board_id = ?1 AND first_seen = ?2
+               AND req_id NOT IN (SELECT key FROM obits WHERE board_id = ?1)",
             board,
             latest_taken,
         )
@@ -374,6 +388,68 @@ impl Store {
         };
 
         Ok(BoardDiff { new, changed, dead })
+    }
+
+    /// Mark a posting (by req_id) or a freeform key dead, rejected, out-of-scope or a
+    /// ghost, so it stops surfacing as NEW. Re-marking the same key updates it. `marked_at`
+    /// is injected, like every other timestamp — the store reads no clock.
+    pub async fn mark_obit(
+        &self,
+        board_id: &BoardId,
+        key: &str,
+        kind: ObitKind,
+        reason: &str,
+        marked_at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let board = board_id.as_str();
+        let kind = json(&kind);
+        let marked = marked_at.to_rfc3339();
+        sqlx::query!(
+            "INSERT INTO obits (board_id, key, kind, reason, marked_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (board_id, key) DO UPDATE SET
+                 kind = excluded.kind,
+                 reason = excluded.reason,
+                 marked_at = excluded.marked_at",
+            board,
+            key,
+            kind,
+            reason,
+            marked,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        Ok(())
+    }
+
+    /// The obit ledger, for audit. Scoped to one board, or all boards if `board_id` is
+    /// `None`.
+    pub async fn list_obits(
+        &self,
+        board_id: Option<&BoardId>,
+    ) -> Result<Vec<ObitRecord>, StoreError> {
+        let filter = board_id.map(BoardId::as_str);
+        let rows = sqlx::query!(
+            "SELECT board_id, key, kind, reason, marked_at FROM obits
+             WHERE ?1 IS NULL OR board_id = ?1
+             ORDER BY marked_at",
+            filter,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| ObitRecord {
+                board_id: BoardId::new(r.board_id),
+                key: r.key,
+                kind: serde_json::from_str(&r.kind).expect("obit kind is JSON we wrote"),
+                reason: r.reason,
+                marked_at: r.marked_at,
+            })
+            .collect())
     }
 }
 
@@ -597,5 +673,59 @@ mod tests {
             .unwrap();
         let diff = store.diff_board(&id).await.unwrap();
         assert_eq!(diff, BoardDiff::default());
+    }
+
+    #[tokio::test]
+    async fn obit_round_trips_and_re_marking_updates() {
+        let (store, id) = seeded().await;
+        store
+            .mark_obit(&id, "1", ObitKind::OutOfScope, "not my stack", day(0))
+            .await
+            .unwrap();
+        let obits = store.list_obits(Some(&id)).await.unwrap();
+        assert_eq!(obits.len(), 1);
+        assert_eq!(obits[0].kind, ObitKind::OutOfScope);
+        assert_eq!(obits[0].key, "1");
+
+        // Re-marking the same key updates rather than duplicating.
+        store
+            .mark_obit(&id, "1", ObitKind::Rejected, "applied, closed", day(1))
+            .await
+            .unwrap();
+        let obits = store.list_obits(Some(&id)).await.unwrap();
+        assert_eq!(obits.len(), 1);
+        assert_eq!(obits[0].kind, ObitKind::Rejected);
+        assert_eq!(obits[0].reason, "applied, closed");
+    }
+
+    #[tokio::test]
+    async fn an_obit_suppresses_a_new_result() {
+        let (store, id) = seeded().await;
+        // A ghost that never existed on a primary source, marked before the fetch.
+        store
+            .mark_obit(
+                &id,
+                "ghost-1",
+                ObitKind::Ghost,
+                "aggregator phantom",
+                day(0),
+            )
+            .await
+            .unwrap();
+        store
+            .record_snapshot(
+                &id,
+                day(1),
+                &[
+                    posting("ghost-1", "Phantom Role"),
+                    posting("real-1", "Real Role"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let diff = store.diff_board(&id).await.unwrap();
+        // Only the real posting is NEW; the ghost is suppressed.
+        assert_eq!(diff.new, vec![ReqId::new("real-1")]);
     }
 }
