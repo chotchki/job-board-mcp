@@ -45,19 +45,34 @@ Posting {
   locations: [string],
   workplace_type: onsite | hybrid | remote | unknown,
   remote_scope: string?,          // "US", "US + Canada", timezone constraints — verbatim, not interpreted
-  comp: { min?, max?, currency?, interval?, source: api | body | site_only | none },
+  comp: Comp,                     // closed enum, below
   posted_at?, updated_at?,
-  updated_at_reliable: bool,      // false on bulk-touch boards (see quirks)
+  updated_at_unreliable: bool,    // true on bulk-touch boards (see quirks)
   department?, employment_type?,
   content_hash,                   // over material fields only — the change-detection key
 }
+
+Comp =
+  | none                                                // "competitive", or nothing published anywhere
+  | site_only                                           // a band exists, but only on the company's rendered site
+  | point { currency, amount_minor, interval, source }  // a single number, not a range
+  | band  { currency, min_minor, max_minor, interval, source }
+
+interval = year | month | week | day | hour
+source   = api | body                                   // amount-bearing sources only
 ```
 
-`fetch_posting` detail adds `description_html` and `description_text`. `comp.source` is honest about WHERE the number came from: some platforms publish comp in the API, some only in the description body, some only on the company's own rendered site (`site_only` means "the API will never tell you — a client that wants the band must fetch the listing page").
+`fetch_posting` detail adds `description_html` and `description_text`. `source` is honest about WHERE the number came from: some platforms publish comp in the API, some only in the description body. The `site_only` variant means "the API will never tell you — a client that wants the band must fetch the listing page", and `none` covers both a board that publishes nothing and one that publishes the word "competitive".
+
+`comp` is a closed enum rather than a bag of optionals because the bag makes illegal states representable: min-without-max, currency-without-amount, a band whose min is USD and max is EUR. None of those are expressible above. `min_minor <= max_minor` is a construction invariant, checked once at parse time rather than re-validated by every consumer.
+
+**Money is integer minor units, end to end, and this is load-bearing rather than dogma.** Amounts are stored in the currency's own exponent (JPY has 0 decimals, KWD has 3), with the exponent derived from an ISO-4217 table at presentation time and never stored. The reason is `content_hash` stability: "$180,000 - $240,000" must encode to bit-identical integers on every single parse, or the hash drifts and the band reports a spurious CHANGE on every fetch — precisely the class of silent, confidence-destroying error this project exists to eliminate. A float path invites `"180000".parse::<f64>() * 100.0` and the rounding that follows it. `i64` is not close to a constraint here: a $10M base in cents is 1e9 against a 9.2e18 ceiling.
+
+Equity is deliberately **out of the money model for v0.1**. It is percentages, share counts or notional-at-a-stated-valuation — not a currency amount — and forcing it down the integer path would pollute the invariant above. A board publishing only equity yields `Comp::None` today; a `Comp::Equity` variant is backlogged.
 
 ## Change semantics
 
-- `content_hash` covers title, locations, workplace_type, comp and a hash of the description — NOT `updated_at`. Several boards bulk-touch `updated_at` across every posting during reindexes, which makes it pure noise as a change signal; the per-board `updated_at_unreliable` flag records this.
+- `content_hash` covers title, locations, workplace_type, comp and a hash of the description — NOT `updated_at`. Several boards bulk-touch `updated_at` across every posting during reindexes, which makes it pure noise as a change signal; the per-board `updated_at_unreliable` flag records this. That flag carries the SAME name and the SAME polarity in the config, in `BoardConfig` and on `Posting` — it is an opt-in defect marker defaulting to false, and nothing anywhere negates it. The double negative reads slightly worse at the use site; the alternative is a boundary where a forgotten field silently claims reliability.
 - **NEW** = req_id never seen on this board. **CHANGED** = hash delta, with the changed fields recorded (in-place down-levels and band cuts are real and worth catching — a title quietly editing from Staff to Senior is a signal). **DEAD** = present in the previous snapshot, absent from the current successful FEED fetch. A single page 404 is never evidence of death — pages 404 for fetch-artifact reasons all the time; only the board's own listing feed counts.
 - **A failed or partial fetch never writes a snapshot.** This is the one invariant that protects the whole diff: a tenant in maintenance mode or a 403 that returned an empty body must surface as `BoardUnreachable`, because recording it as a snapshot would mark every posting on the board DEAD and poison the next diff.
 
