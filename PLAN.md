@@ -12,7 +12,7 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 
 ## Phase C - Adapters wave 1
 - [x] C.1 - greenhouse adapter + fixtures (comp.source: site_only flag path, hosted-URL variants)
-- [ ] C.2 - ashby adapter + fixtures (workplaceType = truth, isRemote = noise; comp extraction from descriptionHtml; browser-UA 403 path)
+- [x] C.2 - ashby adapter + fixtures (workplaceType = truth, isRemote = noise; comp extraction from descriptionHtml; browser-UA 403 path)
 - [ ] C.3 - lever adapter + fixtures
 - [ ] C.4 - live smoke tests, #[ignore] by default, against 2-3 large public boards; a scheduled (weekly, not per-push) CI job runs them, so an #[ignore]d test cannot rot green-forever when an API shifts under it
 

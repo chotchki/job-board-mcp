@@ -111,6 +111,40 @@ impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for Currency {
     }
 }
 
+/// Parse a non-negative decimal string ("168000", "151000.50") into minor units at
+/// the given exponent, WITHOUT a float anywhere — this is the money path, and the whole
+/// point of the module ban is that `"151000".parse::<f64>() * 100.0` never happens.
+/// Returns `None` on anything that isn't a clean non-negative decimal, or that carries
+/// more fractional digits than the currency's minor unit can hold (e.g. cents on JPY).
+pub fn decimal_to_minor(s: &str, exponent: u32) -> Option<i64> {
+    let s = s.trim();
+    let (int_part, frac_part) = s.split_once('.').unwrap_or((s, ""));
+    if int_part.is_empty() || !int_part.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if !frac_part.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let exp = exponent as usize;
+    if frac_part.len() > exp {
+        return None;
+    }
+    let scale = 10i64.checked_pow(exponent)?;
+    let whole = int_part.parse::<i64>().ok()?.checked_mul(scale)?;
+    // Right-pad the fraction to exactly `exp` digits, then it's an integer count of
+    // minor units.
+    let mut frac = frac_part.to_owned();
+    while frac.len() < exp {
+        frac.push('0');
+    }
+    let frac_minor = if frac.is_empty() {
+        0
+    } else {
+        frac.parse::<i64>().ok()?
+    };
+    whole.checked_add(frac_minor)
+}
+
 /// The period a comp figure is quoted over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -347,6 +381,19 @@ mod tests {
         // not load, or the invariant means nothing.
         let json = r#"{"kind":"band","currency":"USD","min_minor":500,"max_minor":100,"interval":"year","source":"api"}"#;
         assert!(serde_json::from_str::<Comp>(json).is_err());
+    }
+
+    #[test]
+    fn decimal_to_minor_stays_integer() {
+        assert_eq!(decimal_to_minor("168000", 2), Some(16_800_000));
+        assert_eq!(decimal_to_minor("151000.50", 2), Some(15_100_050));
+        assert_eq!(decimal_to_minor("25.5", 2), Some(2_550));
+        assert_eq!(decimal_to_minor("9000", 0), Some(9_000)); // JPY, no minor unit
+        assert_eq!(decimal_to_minor("100.5", 0), None); // cents on a 0-decimal currency
+        assert_eq!(decimal_to_minor("1.234", 2), None); // more precision than USD holds
+        assert_eq!(decimal_to_minor("-5", 2), None); // negative
+        assert_eq!(decimal_to_minor("abc", 2), None);
+        assert_eq!(decimal_to_minor("", 2), None);
     }
 
     #[test]

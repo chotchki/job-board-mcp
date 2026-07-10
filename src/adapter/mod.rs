@@ -9,8 +9,10 @@ use crate::config::BoardConfig;
 use crate::http::HttpClient;
 use crate::model::{BoardId, Posting, PostingDetail, ReqId};
 
+mod ashby;
 mod greenhouse;
 
+pub use ashby::AshbyAdapter;
 pub use greenhouse::GreenhouseAdapter;
 
 /// Why an adapter call failed. Every variant is loud and typed — especially
