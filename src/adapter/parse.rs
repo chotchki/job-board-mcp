@@ -26,6 +26,22 @@ pub(crate) fn epoch_millis(value: Option<i64>) -> Option<DateTime<Utc>> {
     value.and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
+/// A bare calendar date `YYYY-MM-DD` (Workday's `startDate`), taken as midnight UTC.
+/// Present-but-unparseable is drift; absent is `None`.
+pub(crate) fn date(
+    context: &str,
+    value: Option<&str>,
+) -> Result<Option<DateTime<Utc>>, AdapterError> {
+    match value {
+        None => Ok(None),
+        Some(s) => chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| Some(dt.and_utc()))
+            .ok_or_else(|| AdapterError::drift(context, format!("bad date {s:?}"))),
+    }
+}
+
 /// Map an ATS interval string onto [`CompInterval`] by its unit word — handles both
 /// Ashby's `"1 YEAR"` and Lever's `"per-year-salary"`. An unrecognized unit is drift,
 /// not a guessed `Year`, so a new cadence can't silently mislabel a band.

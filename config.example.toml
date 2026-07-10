@@ -22,3 +22,11 @@ token = "openai"
 id = "example-on-lever"
 ats = "lever"
 token = "example"
+
+# Workday is the exception: `token` is the API HOST (from the careers URL) and `site`
+# is the career-site id. The tenant is the host's first label.
+[[board]]
+id = "nvidia"
+ats = "workday"
+token = "nvidia.wd5.myworkdayjobs.com"
+site = "NVIDIAExternalCareerSite"

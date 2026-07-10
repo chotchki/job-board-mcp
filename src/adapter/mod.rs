@@ -13,10 +13,12 @@ mod ashby;
 mod greenhouse;
 mod lever;
 mod parse;
+mod workday;
 
 pub use ashby::AshbyAdapter;
 pub use greenhouse::GreenhouseAdapter;
 pub use lever::LeverAdapter;
+pub use workday::WorkdayAdapter;
 
 /// Why an adapter call failed. Every variant is loud and typed — especially
 /// [`ParseDrift`](AdapterError::ParseDrift), which an adapter returns *instead of*
@@ -72,6 +74,7 @@ pub async fn list_for(
         Ats::Greenhouse => GreenhouseAdapter.list(http, board).await,
         Ats::Ashby => AshbyAdapter.list(http, board).await,
         Ats::Lever => LeverAdapter.list(http, board).await,
+        Ats::Workday => WorkdayAdapter.list(http, board).await,
     }
 }
 
@@ -85,6 +88,7 @@ pub async fn detail_for(
         Ats::Greenhouse => GreenhouseAdapter.detail(http, board, req_id).await,
         Ats::Ashby => AshbyAdapter.detail(http, board, req_id).await,
         Ats::Lever => LeverAdapter.detail(http, board, req_id).await,
+        Ats::Workday => WorkdayAdapter.detail(http, board, req_id).await,
     }
 }
 
@@ -158,6 +162,7 @@ mod tests {
             id: BoardId::new("stub"),
             ats: Ats::Greenhouse,
             token: AtsToken::new("stub"),
+            site: None,
             comp_site_only: false,
             updated_at_unreliable: false,
         }

@@ -1,0 +1,35 @@
+{
+  "jobPostingInfo": {
+    "id": "0c5cfb6c739310020c3ef70dc1820000",
+    "title": "ASIC Design Efficiency Engineer",
+    "jobDescription": "<p>We are now looking for an ASIC Design Efficiency Engineer! NVIDIA is seeking extraordinary methodology engineers to design hardware accelerators an",
+    "location": "US, CA, Santa Clara",
+    "additionalLocations": [
+      "US, TX, Austin",
+      "US, NC, Durham"
+    ],
+    "postedOn": "Posted Today",
+    "startDate": "2026-07-10",
+    "timeType": "Full time",
+    "jobReqId": "JR1998928",
+    "jobPostingId": "ASIC-Design-Efficiency-Engineer_JR1998928",
+    "jobPostingSiteId": "NVIDIAExternalCareerSite",
+    "country": {
+      "descriptor": "United States of America",
+      "id": "bc33aa3152ec42d4995f4791a106ed09"
+    },
+    "canApply": true,
+    "posted": true,
+    "includeResumeParsing": true,
+    "jobRequisitionLocation": {
+      "descriptor": "US, CA, Santa Clara",
+      "country": {
+        "descriptor": "United States of America",
+        "id": "bc33aa3152ec42d4995f4791a106ed09",
+        "alpha2Code": "US"
+      }
+    },
+    "externalUrl": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/ASIC-Design-Efficiency-Engineer_JR1998928",
+    "questionnaireId": "3403860341171001f57d5c603f290000"
+  }
+}

@@ -73,6 +73,27 @@ impl HttpClient {
     /// HTTP non-success to [`AdapterError::BoardUnreachable`] and any network failure to
     /// [`AdapterError::Transport`] — so a caller never mistakes a dead fetch for a body.
     pub async fn get_text(&self, url: &str) -> Result<String, AdapterError> {
+        self.send_gated(url, self.client.get(url)).await
+    }
+
+    /// POST a JSON body, returning the response text. Same politeness gate and error
+    /// mapping as [`get_text`](Self::get_text) — Workday's search endpoint needs it.
+    pub async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<String, AdapterError> {
+        self.send_gated(url, self.client.post(url).json(body)).await
+    }
+
+    /// Run a request behind the per-host politeness gate: wait out the remaining delay for
+    /// this host, send, then record the end-time (even on failure, so a failing host stays
+    /// spaced out).
+    async fn send_gated(
+        &self,
+        url: &str,
+        request: reqwest::RequestBuilder,
+    ) -> Result<String, AdapterError> {
         let host = Url::parse(url)
             .map_err(|e| AdapterError::Transport(format!("invalid url {url}: {e}")))?
             .host_str()
@@ -96,33 +117,32 @@ impl HttpClient {
             }
         }
 
-        let result = self.send(url).await;
-        // Record the end-time even on failure, so a failing host is still spaced out.
+        let result = execute(url, request).await;
         *last = Some(Instant::now());
         result
     }
+}
 
-    async fn send(&self, url: &str) -> Result<String, AdapterError> {
-        let response = self.client.get(url).send().await.map_err(|e| {
-            if e.is_timeout() {
-                AdapterError::Transport(format!("timeout fetching {url}"))
-            } else {
-                AdapterError::Transport(format!("fetching {url}: {e}"))
-            }
-        })?;
-
-        let status = response.status();
-        if !status.is_success() {
-            return Err(AdapterError::BoardUnreachable {
-                status: status.as_u16(),
-            });
+async fn execute(url: &str, request: reqwest::RequestBuilder) -> Result<String, AdapterError> {
+    let response = request.send().await.map_err(|e| {
+        if e.is_timeout() {
+            AdapterError::Transport(format!("timeout fetching {url}"))
+        } else {
+            AdapterError::Transport(format!("fetching {url}: {e}"))
         }
+    })?;
 
-        response
-            .text()
-            .await
-            .map_err(|e| AdapterError::Transport(format!("reading body from {url}: {e}")))
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AdapterError::BoardUnreachable {
+            status: status.as_u16(),
+        });
     }
+
+    response
+        .text()
+        .await
+        .map_err(|e| AdapterError::Transport(format!("reading body from {url}: {e}")))
 }
 
 #[cfg(test)]

@@ -482,6 +482,7 @@ mod tests {
             id: BoardId::new("gitlab"),
             ats: Ats::Greenhouse,
             token: AtsToken::new("gitlab"),
+            site: None,
             comp_site_only: false,
             updated_at_unreliable: false,
         }

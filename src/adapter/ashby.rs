@@ -236,6 +236,7 @@ mod tests {
             id: BoardId::new("ramp"),
             ats: Ats::Ashby,
             token: AtsToken::new("ramp"),
+            site: None,
             comp_site_only: false,
             updated_at_unreliable: false,
         }

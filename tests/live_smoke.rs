@@ -20,6 +20,7 @@ fn board(id: &str, ats: Ats, token: &str) -> BoardConfig {
         id: BoardId::new(id),
         ats,
         token: AtsToken::new(token),
+        site: None,
         comp_site_only: false,
         updated_at_unreliable: false,
     }
@@ -72,4 +73,24 @@ async fn lever_live() {
     let board = board("gopuff", Ats::Lever, "gopuff");
     let postings = LeverAdapter.list(&http, &board).await.unwrap();
     assert_well_formed(&postings, "gopuff");
+}
+
+#[tokio::test]
+#[ignore = "hits the live workday API; run with --ignored"]
+async fn workday_live() {
+    // A single page is the drift check — the full nvidia board is ~2000 postings across
+    // ~100 paginated requests, too much to fetch just to confirm the shape. If Workday
+    // renames these fields the adapter breaks, and this catches it cheaply.
+    let http = HttpClient::new(HttpConfig::default()).unwrap();
+    let url = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs";
+    let body = http
+        .post_json(
+            url,
+            &serde_json::json!({ "appliedFacets": {}, "limit": 5, "offset": 0, "searchText": "" }),
+        )
+        .await
+        .unwrap();
+    for marker in ["jobPostings", "bulletFields", "externalPath", "title"] {
+        assert!(body.contains(marker), "workday response missing {marker}");
+    }
 }

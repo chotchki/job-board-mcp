@@ -31,8 +31,13 @@ pub struct BoardConfig {
     /// Our name for the board (also its snapshot key).
     pub id: BoardId,
     pub ats: Ats,
-    /// The ATS tenant slug in the board's API URL.
+    /// The ATS tenant slug in the board's API URL. For Workday this is the full API host
+    /// instead (e.g. `"nvidia.wd5.myworkdayjobs.com"`), paired with [`site`](Self::site).
     pub token: AtsToken,
+    /// Workday only: the career-site id (e.g. `"NVIDIAExternalCareerSite"`). Ignored by
+    /// every other ATS.
+    #[serde(default)]
+    pub site: Option<String>,
     /// Bands publish only on the company's rendered site, never in this ATS's API, so
     /// comp arrives as `Comp::SiteOnly`. Forward-compat default: an older config without
     /// the key loads with it false.
@@ -118,7 +123,7 @@ mod tests {
         // failing the build.
         let cfg = Config::from_toml(include_str!("../config.example.toml")).unwrap();
         assert_eq!(cfg.db_path, "~/.local/share/job-board-mcp/store.sqlite");
-        assert_eq!(cfg.boards.len(), 3);
+        assert_eq!(cfg.boards.len(), 4);
         let stripe = &cfg.boards[0];
         assert_eq!(stripe.id, BoardId::new("stripe"));
         assert_eq!(stripe.ats, Ats::Greenhouse);
@@ -170,7 +175,7 @@ mod tests {
             db_path = "/tmp/store.sqlite"
             [[board]]
             id = "acme"
-            ats = "workday"
+            ats = "workable"
             token = "acme"
             "#,
         );

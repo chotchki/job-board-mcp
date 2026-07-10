@@ -21,6 +21,7 @@ fn board() -> BoardConfig {
         id: BoardId::new("acme"),
         ats: Ats::Greenhouse,
         token: AtsToken::new("acme"),
+        site: None,
         comp_site_only: false,
         updated_at_unreliable: false,
     }

@@ -15,6 +15,7 @@ pub enum Ats {
     Greenhouse,
     Ashby,
     Lever,
+    Workday,
 }
 
 /// Where the work happens. `Unknown` is the honest default for a board that doesn't
@@ -64,7 +65,7 @@ mod tests {
     #[test]
     fn unknown_ats_variant_fails_loud() {
         // A wave-2 board named before its adapter exists must NOT parse silently.
-        let err = serde_json::from_str::<Ats>("\"workday\"");
+        let err = serde_json::from_str::<Ats>("\"workable\"");
         assert!(err.is_err(), "unimplemented ATS should fail to deserialize");
     }
 

@@ -40,6 +40,7 @@ impl Fixture {
                 id: BoardId::new("testco"),
                 ats: Ats::Greenhouse,
                 token: AtsToken::new("testco"),
+                site: None,
                 comp_site_only: false,
                 updated_at_unreliable: false,
             }],

@@ -199,6 +199,7 @@ mod tests {
             id: BoardId::new("gopuff"),
             ats: Ats::Lever,
             token: AtsToken::new("gopuff"),
+            site: None,
             comp_site_only: false,
             updated_at_unreliable: false,
         }

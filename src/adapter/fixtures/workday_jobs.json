@@ -1,0 +1,23 @@
+{
+  "total": 2000,
+  "jobPostings": [
+    {
+      "title": "ASIC Design Efficiency Engineer",
+      "externalPath": "/job/US-CA-Santa-Clara/ASIC-Design-Efficiency-Engineer_JR1998928",
+      "locationsText": "3 Locations",
+      "postedOn": "Posted Today",
+      "bulletFields": [
+        "JR1998928"
+      ]
+    },
+    {
+      "title": "Senior Software Engineer, DPU - Networking",
+      "externalPath": "/job/US-MA-Westford/Senior-Software-Engineer--DPU---Networking_JR2017846",
+      "locationsText": "US, MA, Westford",
+      "postedOn": "Posted Today",
+      "bulletFields": [
+        "JR2017846"
+      ]
+    }
+  ]
+}
