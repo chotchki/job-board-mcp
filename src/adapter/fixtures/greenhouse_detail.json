@@ -1,0 +1,27 @@
+{
+  "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/8503792002",
+  "internal_job_id": 6396658002,
+  "location": {
+    "name": "Remote, Italy"
+  },
+  "id": 8503792002,
+  "updated_at": "2026-06-05T16:18:10-04:00",
+  "requisition_id": "6263",
+  "title": "Account Executive - Italy",
+  "company_name": "GitLab",
+  "first_published": "2026-04-17T05:58:03-04:00",
+  "language": "en",
+  "application_deadline": null,
+  "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;GitLab is the intelligent orchestration platform for DevSecOps. GitLab enables organizations to increase dev&lt;/div&gt;",
+  "departments": [
+    {
+      "id": 4096748002,
+      "name": "EMEA - Commercial",
+      "child_ids": [],
+      "parent_id": 4096735002
+    }
+  ],
+  "ai_disclaimer": null,
+  "include_ai_disclaimer": null,
+  "ai_opt_out_request_url": null
+}

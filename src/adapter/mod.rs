@@ -6,7 +6,12 @@
 use std::future::Future;
 
 use crate::config::BoardConfig;
+use crate::http::HttpClient;
 use crate::model::{BoardId, Posting, PostingDetail, ReqId};
+
+mod greenhouse;
+
+pub use greenhouse::GreenhouseAdapter;
 
 /// Why an adapter call failed. Every variant is loud and typed — especially
 /// [`ParseDrift`](AdapterError::ParseDrift), which an adapter returns *instead of*
@@ -53,9 +58,11 @@ impl AdapterError {
 /// `async fn`) is what guarantees that at the trait boundary.
 pub trait Adapter {
     /// Fetch the board's current listing, normalized. A successful return is the ONLY
-    /// thing that may become a snapshot.
+    /// thing that may become a snapshot. The `http` client is passed in so adapters stay
+    /// stateless (zero-size) and their parse logic stays testable against fixtures.
     fn list(
         &self,
+        http: &HttpClient,
         board: &BoardConfig,
     ) -> impl Future<Output = Result<Vec<Posting>, AdapterError>> + Send;
 
@@ -63,6 +70,7 @@ pub trait Adapter {
     /// apply time.
     fn detail(
         &self,
+        http: &HttpClient,
         board: &BoardConfig,
         req_id: &ReqId,
     ) -> impl Future<Output = Result<PostingDetail, AdapterError>> + Send;
@@ -78,7 +86,11 @@ mod tests {
     struct StubAdapter;
 
     impl Adapter for StubAdapter {
-        async fn list(&self, board: &BoardConfig) -> Result<Vec<Posting>, AdapterError> {
+        async fn list(
+            &self,
+            _http: &HttpClient,
+            board: &BoardConfig,
+        ) -> Result<Vec<Posting>, AdapterError> {
             Ok(vec![Posting {
                 ats: board.ats,
                 board_id: board.id.clone(),
@@ -100,6 +112,7 @@ mod tests {
 
         async fn detail(
             &self,
+            _http: &HttpClient,
             board: &BoardConfig,
             req_id: &ReqId,
         ) -> Result<PostingDetail, AdapterError> {
@@ -121,7 +134,8 @@ mod tests {
     #[tokio::test]
     async fn trait_is_implementable_and_futures_are_send() {
         // Spawning forces the future to be Send — a compile-time proof of the bound.
-        let postings = tokio::spawn(async { StubAdapter.list(&board()).await })
+        let http = crate::http::HttpClient::new(crate::http::HttpConfig::default()).unwrap();
+        let postings = tokio::spawn(async move { StubAdapter.list(&http, &board()).await })
             .await
             .unwrap()
             .unwrap();
