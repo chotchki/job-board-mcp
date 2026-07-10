@@ -53,7 +53,7 @@ A misspelled key is a hard error, not a silent default — config is yours to ge
 | Tool | Input | Returns |
 |---|---|---|
 | `list_boards` | — | configured boards: `id`, `ats`, last successful snapshot time |
-| `fetch_board` | `board_id` | live fetch → normalized postings; records a snapshot on success |
+| `fetch_board` | `board_id`, optional `full` | live fetch → records a snapshot on success; returns a summary (`snapshot_id`, `posting_count`) by default, or the full postings array when `full: true` |
 | `fetch_posting` | `board_id`, `req_id` | full detail incl. description text/html, for JD capture at apply time |
 | `diff_boards` | optional `board_ids[]` | NEW / CHANGED / DEAD per board vs the previous snapshot, obits excluded |
 | `mark_obit` | `board_id`, `key`, `kind`, `reason` | suppresses the row from future NEW results |
@@ -75,8 +75,10 @@ The accumulated per-platform field knowledge that used to live in prose and get 
 | Workday | `{host}/wday/cxs/{tenant}/{site}/jobs` (POST) | `token` is the API host and a `site` is required. The list is thin (a `locationsText` summary, a relative `postedOn`); real locations and the `startDate` post date come from the detail, which is keyed by path so `fetch_posting` searches for the req to find it. Maintenance mode surfaces as unreachable, never an empty board. |
 | SmartRecruiters | `api.smartrecruiters.com/v1/companies/{token}/postings` | Paginated. `location` carries explicit `remote`/`hybrid` booleans, so workplace type is read, not inferred. `token` is the company identifier. |
 | Rippling | `api.rippling.com/platform/api/ats/v1/board/{token}/jobs` | The feed is the thin listing source; per-job ground truth (full locations, `createdOn`, description) is scraped from the job page's `__NEXT_DATA__`. Rippling inverts `label`/`id` on `employmentType`. |
-| github.careers | `www.github.careers/api/jobs` | GitHub's own board, so `token` is ignored. The `?query=` param is ignored server-side and the HTML no-results i18n trap only bites the page — both sidestepped by paging the JSON API. The list carries descriptions. |
-| Workable | — | Not yet implemented. Its API returns valid JSON but no populated board could be captured to build against, so it's deferred rather than guessed. Naming an unimplemented ATS in config is a loud parse error. |
+| github.careers | `www.github.careers/api/jobs` | GitHub's own board, so `token` is ignored. The `?query=` param is ignored server-side and the HTML no-results i18n trap only bites the page — both sidestepped by paging the JSON API. The list carries descriptions; salary fields, when published, are harvested as annual USD. |
+| Workable | `POST apply.workable.com/api/v3/accounts/{token}/jobs` | `token` is the account slug; `workplace` is a clean enum read directly. The list omits the description, so detail grafts it from the widget endpoint. A migrated-off board returns `200` + `total: 0` (same silent shape as Lever). |
+
+All seven ATSes are implemented. Naming an unimplemented one in config is a loud parse error.
 
 Comp is always integer minor units — a band encodes to the same integers on every parse, so `content_hash` is stable and a band that didn't change never reports CHANGED. An unrecognized currency or pay interval is a loud `ParseDrift`, never a guess: a wrong band silently reaching a decision is the exact failure this project exists to kill.
 

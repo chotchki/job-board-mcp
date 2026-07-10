@@ -304,6 +304,21 @@ mod tests {
     }
 
     #[test]
+    fn a_salary_component_with_null_min_is_absent_not_present_empty() {
+        // Linear's shouldDisplayCompensationOnJobPostings=false (and OpenAI's unfilled
+        // tiers) yield a Salary component with null min/max. That's "no published band"
+        // → Comp::None, never a broken zero band.
+        let body = r#"{"jobs":[{
+            "id":"x","title":"t","jobUrl":"http://x","workplaceType":"Remote",
+            "compensation":{"summaryComponents":[
+                {"compensationType":"Salary","minValue":null,"maxValue":null,"currencyCode":"USD","interval":"1 YEAR"}
+            ]}
+        }]}"#;
+        let postings = AshbyAdapter::parse_jobs(body, &board()).unwrap();
+        assert_eq!(postings[0].comp, Comp::None);
+    }
+
+    #[test]
     fn a_changed_shape_is_parse_drift() {
         let broken = r#"{"jobs":[{"title":"x","jobUrl":"http://x"}]}"#; // missing id
         assert!(matches!(
