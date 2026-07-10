@@ -6,15 +6,17 @@ An MCP server that turns job-board scraping into a typed, deterministic tool cal
 
 The full design, the change semantics, and the reasoning behind each per-platform quirk live in [SPEC.md](SPEC.md).
 
+> **New here?** [docs/USAGE.md](docs/USAGE.md) is the practical walkthrough — install, wiring it into your MCP client, and a daily-scan workflow. This page is the reference.
+
 ## Install
 
 Rust 1.85+ (edition 2024). SQLite is bundled — no system library needed.
 
 ```
-cargo build --release
+cargo install --path .
 ```
 
-The binary is `target/release/job-board-mcp`. It speaks MCP over stdio and takes its board list from a config file (below). Point your MCP client at it, e.g.:
+That installs the `job-board-mcp` binary to `~/.cargo/bin`. (Not on crates.io — this is a personal tool, so `publish` is off; install from a local checkout.) It speaks MCP over stdio and takes its board list from a config file (below). Point your MCP client at it, e.g.:
 
 ```json
 {
