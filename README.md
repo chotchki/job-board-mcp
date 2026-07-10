@@ -37,6 +37,7 @@ TOML. Copy [`config.example.toml`](config.example.toml), edit it, and keep it wh
 
 ```toml
 db_path = "~/.local/share/job-board-mcp/store.sqlite"
+raw_capture_days = 7           # days of raw fetch samples to keep; 0 turns capture off
 
 [[board]]
 id = "stripe"                  # your name for the board; also its snapshot key
@@ -58,10 +59,16 @@ A misspelled key is a hard error, not a silent default — config is yours to ge
 | `diff_boards` | optional `board_ids[]` | NEW / CHANGED / DEAD per board vs the previous snapshot, obits excluded |
 | `mark_obit` | `board_id`, `key`, `kind`, `reason` | suppresses the row from future NEW results |
 | `list_obits` | optional `board_id` | the ledger, for audit |
+| `list_captures` | optional `board_id`, `limit` | the raw-capture ledger, metadata only (no bodies) |
+| `dump_captures` | optional `out_dir`, `board_id`, `limit` | writes captured raw bodies to sample files and returns their paths |
 
 **NEW** is a req_id never seen on this board. **CHANGED** is a material-content change (title, locations, workplace type, comp, or description) with the moved fields named — a quiet Staff→Senior edit shows up here. **DEAD** is a posting present in the previous snapshot and absent from the latest successful feed; a single page 404 never counts, only the board's own listing. A bulk-touched `updated_at` is not a change, because the change key deliberately excludes it. And a failed or partial fetch NEVER records a snapshot — a board in maintenance mode surfaces as an error, because recording it as empty would mark everything DEAD and poison the next diff.
 
 Obit kinds: `dead` (req vanished, confirmed), `rejected` (applied and closed), `out_of_scope` (looked at it, ruled out), `ghost` (an aggregator listing that never existed on a primary source — these re-bite a scan endlessly without a ledger).
+
+## Sample capture
+
+Every successful fetch logs its raw response body to the store, keyed by board and auto-purged past `raw_capture_days` (default 7, `0` turns it off). The point is dogfooding: when an adapter needs building or an ATS quietly changes its API, the fix wants a REAL sample, not a hand-typed approximation of one. `dump_captures` writes those bodies to sample files and returns the paths — never the bodies inline, because a single board is hundreds of KB and dumping that into a client's context is its own kind of bug. Pass `out_dir` to choose where they land; omit it and they go to a `captures/` directory beside the store. `list_captures` is the metadata-only view of the ledger, for finding the one you want before you dump it.
 
 ## The quirk table
 
@@ -70,7 +77,7 @@ The accumulated per-platform field knowledge that used to live in prose and get 
 | Platform | Endpoint | Quirks the adapter owns |
 |---|---|---|
 | greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Comp is usually absent from the API even when the company publishes it (`comp_site_only` per-board flag). `absolute_url` is authoritative, so hosted-URL variants (`job-boards.` vs `boards.` vs company-hosted) are a non-issue. Workplace type isn't a field — inferred as Remote only when the location literally says so, else Unknown. |
-| Ashby | `api.ashbyhq.com/posting-api/job-board/{token}` | `workplaceType` is the location truth; `isRemote` is board-wide noise and is never read. Comp is structured in the API (`compensation.summaryComponents`); equity components are out of the v0.1 comp model. No single-job endpoint, so detail re-fetches the board. |
+| Ashby | `api.ashbyhq.com/posting-api/job-board/{token}` | `workplaceType` is the location truth; `isRemote` is board-wide noise and is never read. Comp is structured in the API (`compensation.summaryComponents`). Equity is a separate axis: a populated `EquityCashValue` becomes `cash_value`, an unfilled tier or an `EquityPercentage` (whose raw scale isn't yet pinned) becomes `offered` — never a guessed number. No single-job endpoint, so detail re-fetches the board. |
 | Lever | `api.lever.co/v0/postings/{token}?mode=json` | Comparatively sane: `workplaceType` is a clean lowercase enum, `salaryRange` is structured, `createdAt` is epoch millis. The top level is a bare array. |
 | Workday | `{host}/wday/cxs/{tenant}/{site}/jobs` (POST) | `token` is the API host and a `site` is required. The list is thin (a `locationsText` summary, a relative `postedOn`); real locations and the `startDate` post date come from the detail, which is keyed by path so `fetch_posting` searches for the req to find it. Maintenance mode surfaces as unreachable, never an empty board. |
 | SmartRecruiters | `api.smartrecruiters.com/v1/companies/{token}/postings` | Paginated. `location` carries explicit `remote`/`hybrid` booleans, so workplace type is read, not inferred. `token` is the company identifier. |
@@ -81,6 +88,8 @@ The accumulated per-platform field knowledge that used to live in prose and get 
 All seven ATSes are implemented. Naming an unimplemented one in config is a loud parse error.
 
 Comp is always integer minor units — a band encodes to the same integers on every parse, so `content_hash` is stable and a band that didn't change never reports CHANGED. An unrecognized currency or pay interval is a loud `ParseDrift`, never a guess: a wrong band silently reaching a decision is the exact failure this project exists to kill.
+
+Equity is a separate field from `comp`, because a posting can carry both a salary band and an equity grant. It captures the forms a board actually publishes — a cash value on the same integer path as salary, a percentage in basis points — and refuses to fabricate the rest: a grant offered without a verifiable figure reads as `offered`, not an invented number. Both `comp` and `equity` feed `content_hash`, so a grant appearing or moving surfaces as CHANGED, while a posting that never had equity hashes exactly as it did before the field existed.
 
 ## Development
 

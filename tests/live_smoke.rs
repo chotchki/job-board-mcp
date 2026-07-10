@@ -15,7 +15,7 @@ use job_board_mcp::adapter::{
     SmartRecruitersAdapter, WorkableAdapter,
 };
 use job_board_mcp::config::BoardConfig;
-use job_board_mcp::http::{HttpClient, HttpConfig};
+use job_board_mcp::http::{FetchCtx, HttpClient, HttpConfig};
 use job_board_mcp::model::{Ats, AtsToken, BoardId, Posting};
 
 fn board(id: &str, ats: Ats, token: &str) -> BoardConfig {
@@ -86,10 +86,15 @@ async fn workday_live() {
     // renames these fields the adapter breaks, and this catches it cheaply.
     let http = HttpClient::new(HttpConfig::default()).unwrap();
     let url = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs";
+    let ctx = FetchCtx {
+        board_id: BoardId::new("nvidia"),
+        ats: Ats::Workday,
+    };
     let body = http
         .post_json(
             url,
             &serde_json::json!({ "appliedFacets": {}, "limit": 5, "offset": 0, "searchText": "" }),
+            &ctx,
         )
         .await
         .unwrap();

@@ -20,8 +20,8 @@ use serde_json::json;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::http::{FetchCtx, HttpClient};
+use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
 
 const MAX_POSTINGS: usize = 10_000;
 
@@ -115,7 +115,14 @@ impl WorkableAdapter {
             .collect();
         let workplace_type = map_workplace(job.workplace.as_deref());
         let comp = Comp::None;
-        let hash = content_hash(&job.title, &locations, workplace_type, &comp, "");
+        let hash = content_hash(
+            &job.title,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            "",
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -131,6 +138,7 @@ impl WorkableAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::rfc3339("workable published", job.published.as_deref())?,
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -158,7 +166,9 @@ impl Adapter for WorkableAdapter {
             if let Some(t) = &token {
                 body["token"] = json!(t);
             }
-            let text = http.post_json(&url, &body).await?;
+            let text = http
+                .post_json(&url, &body, &FetchCtx::from_board(board))
+                .await?;
             let (page, next) = Self::parse_page(&text, board)?;
             let page_len = page.len();
             postings.extend(page);
@@ -184,6 +194,7 @@ impl Adapter for WorkableAdapter {
                 &json!({
                     "query": "", "location": [], "department": [], "worktype": [], "remote": []
                 }),
+                &FetchCtx::from_board(board),
             )
             .await?;
         let (postings, _) = Self::parse_page(&list_body, board)?;
@@ -193,7 +204,10 @@ impl Adapter for WorkableAdapter {
             .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
 
         let widget = http
-            .get_text(&Self::widget_url(board.token.as_str()))
+            .get_text(
+                &Self::widget_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
             .await?;
         let parsed: WidgetResponse = serde_json::from_str(&widget)
             .map_err(|e| AdapterError::drift("workable widget", e.to_string()))?;

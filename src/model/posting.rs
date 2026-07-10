@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{Ats, BoardId, Comp, ContentHash, ReqId, WorkplaceType};
+use super::{Ats, BoardId, Comp, ContentHash, Equity, ReqId, WorkplaceType};
 
 /// A normalized posting as it appears in a board's listing feed. The description
 /// itself is not here — it belongs to [`PostingDetail`] — but its hash feeds
@@ -28,6 +28,11 @@ pub struct Posting {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_scope: Option<String>,
     pub comp: Comp,
+    /// Equity grant, an axis independent of `comp` (salary) — a posting can carry both.
+    /// Defaults to [`Equity::None`] and is omitted from the wire form when absent, so a
+    /// posting written before this field existed loads clean and hashes unchanged.
+    #[serde(default, skip_serializing_if = "Equity::is_none")]
+    pub equity: Equity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posted_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -67,6 +72,12 @@ struct MaterialFields<'a> {
     locations: &'a [String],
     workplace_type: WorkplaceType,
     comp: &'a Comp,
+    // Skipped when None so a posting with no equity serializes to the exact bytes it did
+    // before this field existed — its hash is unchanged, and only postings that actually
+    // gained equity data re-hash. `Equity` is `Copy`, so the field is held by value and
+    // `skip_serializing_if` sees `&Equity` directly.
+    #[serde(skip_serializing_if = "Equity::is_none")]
+    equity: Equity,
     description_hash: String,
 }
 
@@ -83,6 +94,7 @@ pub fn content_hash(
     locations: &[String],
     workplace_type: WorkplaceType,
     comp: &Comp,
+    equity: Equity,
     description: &str,
 ) -> ContentHash {
     // Trim leading/trailing whitespace so an ATS that pads a title one day and trims it
@@ -97,6 +109,7 @@ pub fn content_hash(
         locations: &locations,
         workplace_type,
         comp,
+        equity,
         description_hash,
     };
     let encoded = serde_json::to_vec(&material).expect("MaterialFields is always serializable");
@@ -107,6 +120,10 @@ pub fn content_hash(
 mod tests {
     use super::*;
     use crate::model::{CompInterval, CompSource, Currency};
+
+    fn usd() -> Currency {
+        Currency::new("USD").unwrap()
+    }
 
     fn sample() -> Posting {
         let comp = Comp::band(
@@ -127,6 +144,7 @@ mod tests {
             workplace_type: WorkplaceType::Remote,
             remote_scope: Some("US".to_owned()),
             comp: comp.clone(),
+            equity: Equity::None,
             posted_at: DateTime::from_timestamp(1_700_000_000, 0),
             updated_at: DateTime::from_timestamp(1_710_000_000, 0),
             updated_at_unreliable: false,
@@ -137,6 +155,7 @@ mod tests {
                 &["Remote US".to_owned(), "New York".to_owned()],
                 WorkplaceType::Remote,
                 &comp,
+                Equity::None,
                 "the job description body",
             ),
         }
@@ -189,6 +208,7 @@ mod tests {
             &["Remote US".to_owned()],
             WorkplaceType::Remote,
             &comp,
+            Equity::None,
             "the job description body",
         );
         assert_eq!(
@@ -202,12 +222,76 @@ mod tests {
         // The function has no timestamp parameter, so a bulk-touched updated_at cannot
         // move the hash. Same material inputs → identical hash.
         let comp = Comp::None;
-        let a = content_hash("Engineer", &[], WorkplaceType::Onsite, &comp, "body");
-        let b = content_hash("Engineer", &[], WorkplaceType::Onsite, &comp, "body");
+        let a = content_hash(
+            "Engineer",
+            &[],
+            WorkplaceType::Onsite,
+            &comp,
+            Equity::None,
+            "body",
+        );
+        let b = content_hash(
+            "Engineer",
+            &[],
+            WorkplaceType::Onsite,
+            &comp,
+            Equity::None,
+            "body",
+        );
         assert_eq!(a, b);
         // A title edit DOES move it.
-        let c = content_hash("Senior Engineer", &[], WorkplaceType::Onsite, &comp, "body");
+        let c = content_hash(
+            "Senior Engineer",
+            &[],
+            WorkplaceType::Onsite,
+            &comp,
+            Equity::None,
+            "body",
+        );
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn equity_participates_in_hash_but_none_is_byte_stable() {
+        let comp = Comp::None;
+        // Absent equity must hash IDENTICALLY to the pre-equity encoding (skip-when-none),
+        // so upgrading the binary doesn't mark every equity-less posting CHANGED.
+        let none = content_hash(
+            "Eng",
+            &[],
+            WorkplaceType::Remote,
+            &comp,
+            Equity::None,
+            "body",
+        );
+        let pinned = content_hash(
+            "Eng",
+            &[],
+            WorkplaceType::Remote,
+            &comp,
+            Equity::None,
+            "body",
+        );
+        assert_eq!(none, pinned);
+        // Present equity DOES move the hash — a grant that appears or shifts is a change.
+        let offered = content_hash(
+            "Eng",
+            &[],
+            WorkplaceType::Remote,
+            &comp,
+            Equity::Offered,
+            "body",
+        );
+        assert_ne!(none, offered);
+        let cash = content_hash(
+            "Eng",
+            &[],
+            WorkplaceType::Remote,
+            &comp,
+            Equity::cash_value(usd(), 10_000_000, 13_000_000, CompInterval::Year).unwrap(),
+            "body",
+        );
+        assert_ne!(offered, cash);
     }
 
     #[test]

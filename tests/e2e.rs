@@ -7,8 +7,10 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use chrono::DateTime;
 use job_board_mcp::config::{BoardConfig, Config};
 use job_board_mcp::model::{Ats, AtsToken, BoardId};
+use job_board_mcp::store::{RawCapture, Store};
 use rmcp::{
     ServiceExt,
     model::CallToolRequestParams,
@@ -36,6 +38,7 @@ impl Fixture {
         // TOML only on the Windows runner. serde makes escaping the code's job.
         let config = Config {
             db_path: dir.join("store.sqlite").to_string_lossy().into_owned(),
+            raw_capture_days: 7,
             boards: vec![BoardConfig {
                 id: BoardId::new("testco"),
                 ats: Ats::Greenhouse,
@@ -88,6 +91,8 @@ async fn server_advertises_its_identity_and_the_full_tool_surface() -> anyhow::R
         "diff_boards",
         "mark_obit",
         "list_obits",
+        "list_captures",
+        "dump_captures",
     ] {
         assert!(
             names.contains(&expected),
@@ -115,6 +120,71 @@ async fn list_boards_reflects_the_config() -> anyhow::Result<()> {
         value["boards"][0]["last_snapshot_at"],
         serde_json::Value::Null
     );
+
+    client.cancel().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn dump_captures_writes_a_sample_file_to_the_chosen_dir() -> anyhow::Result<()> {
+    let fixture = Fixture::new("dump");
+    // Pre-seed a capture straight into the store the binary will open — the e2e can't hit
+    // a live board, so we seed the ledger the way a real fetch would have. Drop the handle
+    // to release the SQLite connection before the child process opens the same file.
+    {
+        let store = Store::open(&fixture.dir.join("store.sqlite")).await?;
+        store
+            .record_capture(
+                &RawCapture {
+                    board_id: &BoardId::new("testco"),
+                    ats: Ats::Greenhouse,
+                    url: "https://boards-api.greenhouse.io/v1/boards/testco/jobs",
+                    method: "GET",
+                    request_body: None,
+                    status: 200,
+                    body: r#"{"jobs":[{"id":1}]}"#,
+                },
+                DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+                7,
+            )
+            .await?;
+    }
+
+    let client = connect(&fixture).await?;
+
+    // The ledger surfaces the seeded capture — metadata only, no body inline.
+    let listed = client
+        .call_tool(
+            CallToolRequestParams::new("list_captures").with_arguments(
+                serde_json::json!({ "board_id": "testco" })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await?;
+    let listed = listed.structured_content.expect("structured content");
+    assert_eq!(listed["captures"][0]["status"], serde_json::json!(200));
+
+    // Dump to a caller-chosen directory and confirm a real file lands there with the body.
+    let out_dir = fixture.dir.join("samples");
+    let dumped = client
+        .call_tool(
+            CallToolRequestParams::new("dump_captures").with_arguments(
+                serde_json::json!({ "out_dir": out_dir.to_string_lossy() })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await?;
+    let dumped = dumped.structured_content.expect("structured content");
+    let path = dumped["dumped"][0]["path"]
+        .as_str()
+        .expect("a dumped file path");
+    assert_eq!(std::fs::read_to_string(path)?, r#"{"jobs":[{"id":1}]}"#);
+    // The body is on disk, never echoed inline — the whole point of dumping to files.
+    assert!(dumped["dumped"][0].get("body").is_none());
 
     client.cancel().await?;
     Ok(())

@@ -12,7 +12,10 @@
 //! - **Comp is structured in the API.** `compensation.summaryComponents` holds a
 //!   `Salary` entry with integer `minValue`/`maxValue`, a `currencyCode` and an
 //!   `interval`. We convert to integer minor units through the money path — never a
-//!   float. Equity components are ignored (equity is out of the v0.1 comp model).
+//!   float. Equity rides a SEPARATE axis (a job carries both a `Salary` and an
+//!   `EquityCashValue`): a populated `EquityCashValue` becomes `Equity::CashValue`, and
+//!   an unfilled tier or an `EquityPercentage` — whose raw scale isn't yet pinned from a
+//!   real sample — becomes `Equity::Offered` rather than a guessed number.
 //! - **May 403 a bare client UA.** The shared HTTP layer sends a browser UA, so this
 //!   is handled upstream.
 
@@ -21,9 +24,9 @@ use serde::Deserialize;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
+use crate::http::{FetchCtx, HttpClient};
 use crate::model::{
-    Comp, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType, content_hash,
+    Comp, CompSource, Currency, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash,
 };
 
 #[derive(Deserialize)]
@@ -121,12 +124,20 @@ impl AshbyAdapter {
         // workplaceType is the truth; isRemote is deliberately never read.
         let workplace_type = map_workplace(job.workplace_type.as_deref());
         let comp = extract_comp(job.compensation.as_ref())?;
+        let equity = extract_equity(job.compensation.as_ref())?;
         let description = job
             .description_plain
             .as_deref()
             .or(job.description_html.as_deref())
             .unwrap_or_default();
-        let hash = content_hash(&job.title, &locations, workplace_type, &comp, description);
+        let hash = content_hash(
+            &job.title,
+            &locations,
+            workplace_type,
+            &comp,
+            equity,
+            description,
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -138,6 +149,7 @@ impl AshbyAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity,
             posted_at: parse::rfc3339("ashby publishedAt", job.published_at.as_deref())?,
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -154,7 +166,12 @@ impl Adapter for AshbyAdapter {
         http: &HttpClient,
         board: &BoardConfig,
     ) -> Result<Vec<Posting>, AdapterError> {
-        let body = http.get_text(&Self::list_url(board.token.as_str())).await?;
+        let body = http
+            .get_text(
+                &Self::list_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
+            .await?;
         Self::parse_jobs(&body, board)
     }
 
@@ -165,7 +182,12 @@ impl Adapter for AshbyAdapter {
         req_id: &ReqId,
     ) -> Result<PostingDetail, AdapterError> {
         // No single-job endpoint on Ashby; re-fetch the board and filter.
-        let body = http.get_text(&Self::list_url(board.token.as_str())).await?;
+        let body = http
+            .get_text(
+                &Self::list_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
+            .await?;
         Self::find_detail(&body, board, req_id)
     }
 }
@@ -180,9 +202,9 @@ fn map_workplace(value: Option<&str>) -> WorkplaceType {
 }
 
 /// Pull a typed [`Comp`] from Ashby's structured components. Only the `Salary` entry is
-/// used — equity is out of the v0.1 model — and everything crosses into minor units via
-/// [`decimal_to_minor`], never a float. A malformed currency or an unrecognized interval
-/// is [`AdapterError::ParseDrift`], not a guess.
+/// used here — equity is a separate axis, see [`extract_equity`] — and everything crosses
+/// into minor units via [`decimal_to_minor`], never a float. A malformed currency or an
+/// unrecognized interval is [`AdapterError::ParseDrift`], not a guess.
 fn extract_comp(compensation: Option<&Compensation>) -> Result<Comp, AdapterError> {
     let Some(comp) = compensation else {
         return Ok(Comp::None);
@@ -224,6 +246,62 @@ fn extract_comp(compensation: Option<&Compensation>) -> Result<Comp, AdapterErro
         Comp::band(currency, min_minor, max_minor, interval, CompSource::Api)
     }
     .map_err(|e| AdapterError::drift("ashby compensation", e.to_string()))
+}
+
+/// Pull a typed [`Equity`] from the same components — a separate axis from salary, since
+/// a job carries both. A populated `EquityCashValue` becomes an annualized
+/// [`Equity::CashValue`] on the integer money path salary uses. An equity component
+/// that's present but unfilled (Ashby's null tiers), or an `EquityPercentage` whose
+/// provider-side scale this build won't guess, becomes [`Equity::Offered`] — "offers
+/// equity" is real signal even without a figure. A malformed currency or interval on a
+/// POPULATED cash value is [`AdapterError::ParseDrift`], never a guess.
+fn extract_equity(compensation: Option<&Compensation>) -> Result<Equity, AdapterError> {
+    let Some(comp) = compensation else {
+        return Ok(Equity::None);
+    };
+    let any_equity = comp.summary_components.iter().any(|c| {
+        matches!(
+            c.compensation_type.as_deref(),
+            Some("EquityCashValue" | "EquityPercentage" | "Equity")
+        )
+    });
+    if !any_equity {
+        return Ok(Equity::None);
+    }
+
+    // A populated cash-value grant is the one form this build quantifies today.
+    let cash = comp.summary_components.iter().find(|c| {
+        c.compensation_type.as_deref() == Some("EquityCashValue") && c.min_value.is_some()
+    });
+    if let Some(cash) = cash {
+        if let Some(code) = cash.currency_code.as_deref() {
+            let currency = Currency::new(code).map_err(|e| {
+                AdapterError::drift("ashby EquityCashValue.currencyCode", e.to_string())
+            })?;
+            let exp = currency.minor_unit_exponent();
+            let interval =
+                parse::interval("ashby EquityCashValue.interval", cash.interval.as_deref())?;
+            let min = parse::number_to_minor(
+                "ashby EquityCashValue.minValue",
+                cash.min_value.as_ref(),
+                exp,
+            )?;
+            if let Some(min_minor) = min {
+                let max_minor = parse::number_to_minor(
+                    "ashby EquityCashValue.maxValue",
+                    cash.max_value.as_ref(),
+                    exp,
+                )?
+                .unwrap_or(min_minor);
+                return Equity::cash_value(currency, min_minor, max_minor, interval)
+                    .map_err(|e| AdapterError::drift("ashby EquityCashValue", e.to_string()));
+            }
+        }
+    }
+
+    // Equity is present but not quantifiable here: a null tier, a cash value missing its
+    // currency, or a percentage whose units this build won't guess. All are "offered".
+    Ok(Equity::Offered)
 }
 
 #[cfg(test)]
@@ -316,6 +394,56 @@ mod tests {
         }]}"#;
         let postings = AshbyAdapter::parse_jobs(body, &board()).unwrap();
         assert_eq!(postings[0].comp, Comp::None);
+    }
+
+    #[test]
+    fn equity_null_tier_is_offered_and_absent_is_none() {
+        // Fixture job 0 carries an EquityCashValue with null min/max (an unfilled tier)
+        // beside a real Salary — "offers equity, no figure" → Offered. Job 1 has no
+        // equity component at all → None. The two must not collapse together.
+        let postings =
+            AshbyAdapter::parse_jobs(include_str!("fixtures/ashby_jobs.json"), &board()).unwrap();
+        assert_eq!(postings[0].equity, Equity::Offered);
+        assert_eq!(postings[1].equity, Equity::None);
+    }
+
+    #[test]
+    fn populated_equity_cash_value_becomes_cash_value_and_coexists_with_salary() {
+        // Real ramp shape: a Salary AND a populated EquityCashValue on the same job —
+        // the exact case that makes equity its own axis rather than a Comp variant.
+        let body = r#"{"jobs":[{
+            "id":"e","title":"t","jobUrl":"http://e","workplaceType":"Remote",
+            "compensation":{"summaryComponents":[
+                {"compensationType":"Salary","minValue":150000,"maxValue":200000,"currencyCode":"USD","interval":"1 YEAR"},
+                {"compensationType":"EquityCashValue","minValue":101000,"maxValue":138000,"currencyCode":"USD","interval":"1 YEAR"}
+            ]}
+        }]}"#;
+        let postings = AshbyAdapter::parse_jobs(body, &board()).unwrap();
+        assert!(matches!(postings[0].comp, Comp::Band { .. }));
+        assert_eq!(
+            postings[0].equity,
+            Equity::cash_value(
+                Currency::new("USD").unwrap(),
+                10_100_000, // $101,000.00 in cents, through the integer money path
+                13_800_000, // $138,000.00 in cents
+                CompInterval::Year,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn equity_percentage_is_offered_until_units_are_pinned() {
+        // EquityPercentage carries a number, but this build refuses to guess its raw
+        // scale — so it surfaces as Offered, never a fabricated basis-point figure.
+        let body = r#"{"jobs":[{
+            "id":"p","title":"t","jobUrl":"http://p","workplaceType":"Remote",
+            "compensation":{"summaryComponents":[
+                {"compensationType":"EquityPercentage","minValue":0.05,"maxValue":0.15,"interval":"1 YEAR"}
+            ]}
+        }]}"#;
+        let postings = AshbyAdapter::parse_jobs(body, &board()).unwrap();
+        assert_eq!(postings[0].equity, Equity::Offered);
     }
 
     #[test]

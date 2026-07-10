@@ -5,9 +5,9 @@
 //! deterministic.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use rmcp::{
     ErrorData as McpError, Json, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -19,28 +19,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::adapter::{self, AdapterError};
+use crate::clock;
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
-use crate::model::{BoardId, ObitKind, ReqId};
+use crate::model::{Ats, BoardId, ObitKind, ReqId};
 use crate::store::{Store, StoreError};
 
-/// The one wall-clock read in the whole process. Every recorded timestamp — a snapshot's
-/// `taken_at`, an obit's `marked_at` — comes from here, so the store never reads a clock
-/// and its diffs stay reproducible. The `#[expect]` is the single sanctioned exception to
-/// the determinism ban, and if it ever stops being needed (no `now()` call remains) the
-/// lint says so.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the MCP handler is the sole clock reader; the store takes time as a parameter"
-)]
-fn now() -> DateTime<Utc> {
-    Utc::now()
-}
-
 struct Inner {
-    store: Store,
+    store: Arc<Store>,
     http: HttpClient,
     boards: HashMap<BoardId, BoardConfig>,
+    /// Fallback root for `dump_captures` when the caller doesn't pass an `out_dir` — the
+    /// store's own directory, so samples land next to the database by default.
+    db_dir: PathBuf,
 }
 
 #[derive(Clone)]
@@ -92,6 +83,30 @@ pub struct ListObitsArgs {
     pub board_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListCapturesArgs {
+    /// Restrict to one board; omit for every board.
+    #[serde(default)]
+    pub board_id: Option<String>,
+    /// Max rows to return, newest first. Default 50.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DumpCapturesArgs {
+    /// Directory to write the sample files into (created if missing). Defaults to a
+    /// `captures` directory beside the store when omitted. A leading `~/` is expanded.
+    #[serde(default)]
+    pub out_dir: Option<String>,
+    /// Restrict to one board; omit for every board.
+    #[serde(default)]
+    pub board_id: Option<String>,
+    /// Max samples to dump, newest first. Default 20.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
 // ---- tool outputs -------------------------------------------------------------------
 //
 // MCP requires an output schema rooted at `type: object`, so each tool returns a small
@@ -135,9 +150,28 @@ struct ObitsResponse {
     obits: Vec<Value>,
 }
 
+#[derive(Serialize, JsonSchema)]
+struct CapturesResponse {
+    captures: Vec<Value>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct DumpResponse {
+    /// Where the samples were written.
+    out_dir: String,
+    /// One entry per file: its path, plus enough metadata to describe the sample without
+    /// carrying the body.
+    dumped: Vec<Value>,
+}
+
 #[tool_router]
 impl JobBoardServer {
-    pub fn new(store: Store, http: HttpClient, boards: Vec<BoardConfig>) -> Self {
+    pub fn new(
+        store: Arc<Store>,
+        http: HttpClient,
+        boards: Vec<BoardConfig>,
+        db_dir: PathBuf,
+    ) -> Self {
         let boards = boards.into_iter().map(|b| (b.id.clone(), b)).collect();
         Self {
             tool_router: Self::tool_router(),
@@ -145,6 +179,7 @@ impl JobBoardServer {
                 store,
                 http,
                 boards,
+                db_dir,
             }),
         }
     }
@@ -196,7 +231,7 @@ impl JobBoardServer {
         let snapshot_id = self
             .inner
             .store
-            .record_snapshot(&board.id, now(), &postings)
+            .record_snapshot(&board.id, clock::now(), &postings)
             .await
             .map_err(store_err)?;
         let postings_echo = args.full.then(|| postings.iter().map(to_value).collect());
@@ -263,7 +298,7 @@ impl JobBoardServer {
         let board = self.board(&args.board_id)?;
         self.inner
             .store
-            .mark_obit(&board.id, &args.key, args.kind, &args.reason, now())
+            .mark_obit(&board.id, &args.key, args.kind, &args.reason, clock::now())
             .await
             .map_err(store_err)?;
         Ok(Json(MarkObitResponse {
@@ -293,6 +328,118 @@ impl JobBoardServer {
             obits: obits.iter().map(to_value).collect(),
         }))
     }
+
+    #[tool(
+        description = "List the raw request/response capture ledger — metadata only, no \
+                          bodies — newest first. Optionally scoped to one board."
+    )]
+    async fn list_captures(
+        &self,
+        Parameters(args): Parameters<ListCapturesArgs>,
+    ) -> Result<Json<CapturesResponse>, McpError> {
+        let board = args
+            .board_id
+            .as_deref()
+            .map(|id| self.board(id))
+            .transpose()?;
+        let limit = args.limit.unwrap_or(50).clamp(1, 1000);
+        let metas = self
+            .inner
+            .store
+            .list_captures(board.map(|b| &b.id), limit)
+            .await
+            .map_err(store_err)?;
+        Ok(Json(CapturesResponse {
+            captures: metas.iter().map(to_value).collect(),
+        }))
+    }
+
+    #[tool(
+        description = "Dump raw captured response bodies to sample files on disk and return \
+                          their PATHS (never the bodies inline — a big board is hundreds of \
+                          KB). Hand a returned file back to have an adapter built or fixed \
+                          against the real shape. Pass out_dir to choose where they land."
+    )]
+    async fn dump_captures(
+        &self,
+        Parameters(args): Parameters<DumpCapturesArgs>,
+    ) -> Result<Json<DumpResponse>, McpError> {
+        let board = args
+            .board_id
+            .as_deref()
+            .map(|id| self.board(id))
+            .transpose()?;
+        let limit = args.limit.unwrap_or(20).clamp(1, 1000);
+        let out_dir = match args.out_dir.as_deref() {
+            Some(dir) => expand_tilde(dir),
+            None => self.inner.db_dir.join("captures"),
+        };
+        std::fs::create_dir_all(&out_dir).map_err(|e| {
+            McpError::internal_error(format!("creating {}: {e}", out_dir.display()), None)
+        })?;
+
+        let records = self
+            .inner
+            .store
+            .dump_captures(board.map(|b| &b.id), limit)
+            .await
+            .map_err(store_err)?;
+
+        let mut dumped = Vec::with_capacity(records.len());
+        for rec in records {
+            let filename = format!(
+                "{}-{}-{}.{}",
+                rec.board_id,
+                ats_slug(rec.ats),
+                rec.id,
+                sample_ext(&rec.body),
+            );
+            let path = out_dir.join(&filename);
+            std::fs::write(&path, &rec.body).map_err(|e| {
+                McpError::internal_error(format!("writing {}: {e}", path.display()), None)
+            })?;
+            dumped.push(json!({
+                "path": path.to_string_lossy(),
+                "board_id": rec.board_id,
+                "url": rec.url,
+                "captured_at": rec.captured_at,
+                "bytes": rec.body.len(),
+            }));
+        }
+        Ok(Json(DumpResponse {
+            out_dir: out_dir.to_string_lossy().into_owned(),
+            dumped,
+        }))
+    }
+}
+
+/// The ATS as a bare slug for a filename (`greenhouse`, not `"greenhouse"`).
+fn ats_slug(ats: Ats) -> String {
+    serde_json::to_value(ats)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "ats".to_owned())
+}
+
+/// A file extension guessed from the body's first non-space byte — so a JSON sample
+/// opens as JSON and Rippling's HTML detail opens as HTML.
+fn sample_ext(body: &str) -> &'static str {
+    match body.trim_start().as_bytes().first() {
+        Some(b'{' | b'[') => "json",
+        Some(b'<') => "html",
+        _ => "txt",
+    }
+}
+
+/// Expand a leading `~/` against the home directory; everything else is verbatim. Mirrors
+/// the binary's own db_path expansion so a `dump_captures out_dir` behaves the same way.
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            return std::path::Path::new(&home).join(rest);
+        }
+    }
+    PathBuf::from(path)
 }
 
 fn to_value<T: Serialize>(value: T) -> Value {

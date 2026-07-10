@@ -18,8 +18,8 @@ use serde::Deserialize;
 
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::http::{FetchCtx, HttpClient};
+use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
 
 #[derive(Deserialize)]
 struct JobsResponse {
@@ -99,7 +99,14 @@ impl GreenhouseAdapter {
             Comp::None
         };
         let description = job.content.as_deref().unwrap_or_default();
-        let hash = content_hash(&job.title, &locations, workplace_type, &comp, description);
+        let hash = content_hash(
+            &job.title,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            description,
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -111,6 +118,7 @@ impl GreenhouseAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: super::parse::rfc3339(
                 "greenhouse first_published",
                 job.first_published.as_deref(),
@@ -130,7 +138,12 @@ impl Adapter for GreenhouseAdapter {
         http: &HttpClient,
         board: &BoardConfig,
     ) -> Result<Vec<Posting>, AdapterError> {
-        let body = http.get_text(&Self::list_url(board.token.as_str())).await?;
+        let body = http
+            .get_text(
+                &Self::list_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
+            .await?;
         Self::parse_jobs(&body, board)
     }
 
@@ -141,7 +154,10 @@ impl Adapter for GreenhouseAdapter {
         req_id: &ReqId,
     ) -> Result<PostingDetail, AdapterError> {
         let body = http
-            .get_text(&Self::detail_url(board.token.as_str(), req_id))
+            .get_text(
+                &Self::detail_url(board.token.as_str(), req_id),
+                &FetchCtx::from_board(board),
+            )
             .await
             .map_err(|e| super::not_found_on_404(e, req_id))?;
         Self::parse_detail(&body, board)

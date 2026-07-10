@@ -45,7 +45,8 @@ Posting {
   locations: [string],
   workplace_type: onsite | hybrid | remote | unknown,
   remote_scope: string?,          // "US", "US + Canada", timezone constraints — verbatim, not interpreted
-  comp: Comp,                     // closed enum, below
+  comp: Comp,                     // salary, closed enum below
+  equity: Equity,                 // equity grant — a SEPARATE axis, below; default none
   posted_at?, updated_at?,
   updated_at_unreliable: bool,    // true on bulk-touch boards (see quirks)
   department?, employment_type?,
@@ -60,6 +61,12 @@ Comp =
 
 interval = year | month | week | day | hour
 source   = api | body                                   // amount-bearing sources only
+
+Equity =
+  | none                                                // no equity mentioned
+  | offered                                             // equity offered, no usable figure (null tier, or a form not yet quantified)
+  | cash_value { currency, min_minor, max_minor, interval }  // annualized notional, integer minor units
+  | percent    { min_bps, max_bps }                     // basis points (1 bp = 0.01%), integer — never a float
 ```
 
 `fetch_posting` detail adds `description_html` and `description_text`. `source` is honest about WHERE the number came from: some platforms publish comp in the API, some only in the description body. The `site_only` variant means "the API will never tell you — a client that wants the band must fetch the listing page", and `none` covers both a board that publishes nothing and one that publishes the word "competitive".
@@ -68,7 +75,7 @@ source   = api | body                                   // amount-bearing source
 
 **Money is integer minor units, end to end, and this is load-bearing rather than dogma.** Amounts are stored in the currency's own exponent (JPY has 0 decimals, KWD has 3), with the exponent derived from an ISO-4217 table at presentation time and never stored. The reason is `content_hash` stability: "$180,000 - $240,000" must encode to bit-identical integers on every single parse, or the hash drifts and the band reports a spurious CHANGE on every fetch — precisely the class of silent, confidence-destroying error this project exists to eliminate. A float path invites `"180000".parse::<f64>() * 100.0` and the rounding that follows it. `i64` is not close to a constraint here: a $10M base in cents is 1e9 against a 9.2e18 ceiling.
 
-Equity is deliberately **out of the money model for v0.1**. It is percentages, share counts or notional-at-a-stated-valuation — not a currency amount — and forcing it down the integer path would pollute the invariant above. A board publishing only equity yields `Comp::None` today; a `Comp::Equity` variant is backlogged.
+Equity is its own axis, **not a `Comp` variant** — because a posting routinely publishes BOTH a salary band and an equity grant (Ashby carries a `Salary` and an `EquityCashValue` on the same job), and a variant would force salary XOR equity and silently drop one. So `equity` is a sibling field of `comp`, defaulting to `none` and skipped from the wire form when absent — which means a posting with no equity hashes bit-identically to one written before the field existed, so upgrading the binary doesn't mark every equity-less posting CHANGED. Equity comes in more shapes than money does: a cash value rides the same integer minor-units path salary uses; a percentage lives in **basis points** (integer, so the hash-stability argument above holds), never a float. What this build won't do is GUESS a scale it hasn't verified: an `EquityPercentage` whose raw units aren't pinned from a real sample surfaces as `offered` — "equity is on the table" is honest signal — rather than a fabricated number, the same no-silent-wrong-band discipline the money path enforces. Share counts and notional-at-a-stated-valuation remain unmodeled until a tracked board actually publishes them.
 
 ## Change semantics
 
@@ -92,7 +99,7 @@ The quirks below are the accumulated field knowledge that used to live in prose 
 | Platform | Endpoint shape | Quirks the adapter must own |
 |---|---|---|
 | greenhouse | `boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | Comp is frequently absent from API content even when published on the company's own site (`comp.source: site_only` per-board flag). Hosted-page URL varies (`job-boards.` vs `boards.` vs company-hosted). |
-| Ashby | `api.ashbyhq.com/posting-api/job-board/{token}` | `isRemote` is board-wide metadata noise — `workplaceType` + description body are the only trustworthy location signals. Comp sometimes appears only inside `descriptionHtml`. May 403 a bare client UA. |
+| Ashby | `api.ashbyhq.com/posting-api/job-board/{token}` | `isRemote` is board-wide metadata noise — `workplaceType` + description body are the only trustworthy location signals. Comp sometimes appears only inside `descriptionHtml`. Equity is structured and on its own axis: `EquityCashValue` → `cash_value`, an unfilled tier or an `EquityPercentage` (units unverified) → `offered`. May 403 a bare client UA. |
 | Lever | `api.lever.co/v0/postings/{token}?mode=json` | Comparatively sane. |
 | Workday | `{tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs` (POST search) | `startDate` is the post date. Tenants go into maintenance mode during migrations — MUST surface as `BoardUnreachable`, never as an empty board. |
 | Workable | `apply.workable.com/api/v3/accounts/{token}/jobs` | — |

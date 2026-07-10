@@ -77,6 +77,15 @@ Without a ledger, the same rejected roles and aggregator phantoms show up as NEW
 
 `list_obits` is the audit view. Re-marking a key updates it in place.
 
+## Handing back a sample
+
+When a board's numbers look wrong, an adapter drifts (`ParseDrift`), or you want a platform this build doesn't cover yet, the fix wants the board's ACTUAL response — not a description of it. That's what capture is for. Every successful fetch already logged its raw body to the store (controlled by `raw_capture_days`, default 7).
+
+1. **`list_captures`** — the ledger, newest first, metadata only (board, url, status, size). Find the one you want; the bodies aren't dragged along.
+2. **`dump_captures`** — writes the raw bodies to files and returns their paths. Pass `out_dir` to choose where they land (a leading `~/` expands); omit it and they go to a `captures/` directory beside the store. Scope with `board_id` and cap with `limit`. The bodies are never echoed inline — a single board is hundreds of KB, and that belongs in a file, not your context window.
+
+Then hand the file back. A real captured response is what turns "the equity number looks off" into a fixed adapter with a test pinned to the actual shape.
+
 ## Troubleshooting
 
 | Symptom | What it means |

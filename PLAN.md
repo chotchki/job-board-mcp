@@ -12,5 +12,4 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 
 ## Backlog (not yet phased)
 
-- **Comp::Equity variant — model equity grants outside the currency path** — added 2026-07-10.
 - **Workday pagination speed — bounded concurrency vs politeness** — added 2026-07-10.

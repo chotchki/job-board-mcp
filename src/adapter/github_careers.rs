@@ -18,9 +18,9 @@ use serde::Deserialize;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
+use crate::http::{FetchCtx, HttpClient};
 use crate::model::{
-    Comp, CompInterval, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType,
+    Comp, CompInterval, CompSource, Currency, Equity, Posting, PostingDetail, ReqId, WorkplaceType,
     content_hash,
 };
 
@@ -88,7 +88,14 @@ impl GithubCareersAdapter {
         )?;
         // The description is in the list, so it counts toward the change key.
         let description = data.description.clone().unwrap_or_default();
-        let hash = content_hash(&data.title, &locations, workplace_type, &comp, &description);
+        let hash = content_hash(
+            &data.title,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            &description,
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -102,6 +109,7 @@ impl GithubCareersAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::datetime_lenient(
                 "github.careers posted_date",
                 data.posted_date.as_deref(),
@@ -124,7 +132,9 @@ impl Adapter for GithubCareersAdapter {
         let mut postings = Vec::new();
         let mut page: i64 = 1;
         loop {
-            let body = http.get_text(&Self::jobs_url(page)).await?;
+            let body = http
+                .get_text(&Self::jobs_url(page), &FetchCtx::from_board(board))
+                .await?;
             let (batch, total) = Self::parse_page(&body, board)?;
             let batch_len = batch.len();
             postings.extend(batch);
@@ -153,7 +163,9 @@ impl Adapter for GithubCareersAdapter {
         // shape, so page through and filter to the req.
         let mut page: i64 = 1;
         loop {
-            let body = http.get_text(&Self::jobs_url(page)).await?;
+            let body = http
+                .get_text(&Self::jobs_url(page), &FetchCtx::from_board(board))
+                .await?;
             let parsed: JobsResponse = serde_json::from_str(&body)
                 .map_err(|e| AdapterError::drift("github.careers jobs", e.to_string()))?;
             let total = parsed.total_count;

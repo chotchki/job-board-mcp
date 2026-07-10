@@ -20,8 +20,19 @@ pub struct Config {
     /// Path to the SQLite store. Kept verbatim here (`~` and env are expanded when the
     /// store is opened, not at parse time).
     pub db_path: String,
+    /// How many days of raw request/response captures to retain. Every successful fetch
+    /// logs its raw body to the store, so a real sample can be dumped and handed back
+    /// when an adapter needs building or fixing; each write purges rows past this window.
+    /// `0` turns capture off entirely. Defaults to 7 — an older config without the key
+    /// gets a week of samples, not silence.
+    #[serde(default = "default_raw_capture_days")]
+    pub raw_capture_days: u32,
     #[serde(default, rename = "board")]
     pub boards: Vec<BoardConfig>,
+}
+
+fn default_raw_capture_days() -> u32 {
+    7
 }
 
 /// One configured board. Mirrors a `[[board]]` table.
@@ -123,6 +134,7 @@ mod tests {
         // failing the build.
         let cfg = Config::from_toml(include_str!("../config.example.toml")).unwrap();
         assert_eq!(cfg.db_path, "~/.local/share/job-board-mcp/store.sqlite");
+        assert_eq!(cfg.raw_capture_days, 7);
         assert_eq!(cfg.boards.len(), 8);
         let stripe = &cfg.boards[0];
         assert_eq!(stripe.id, BoardId::new("stripe"));
@@ -147,6 +159,20 @@ mod tests {
         let b = &cfg.boards[0];
         assert!(!b.comp_site_only);
         assert!(!b.updated_at_unreliable);
+        // No key → a week of captures, the safe default (not zero/off).
+        assert_eq!(cfg.raw_capture_days, 7);
+    }
+
+    #[test]
+    fn raw_capture_days_can_be_turned_off() {
+        let cfg = Config::from_toml(
+            r#"
+            db_path = "/tmp/store.sqlite"
+            raw_capture_days = 0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.raw_capture_days, 0);
     }
 
     #[test]

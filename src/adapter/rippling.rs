@@ -10,8 +10,8 @@ use serde::Deserialize;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::http::{FetchCtx, HttpClient};
+use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
 
 #[derive(Deserialize)]
 struct FeedJob {
@@ -116,7 +116,14 @@ impl RipplingAdapter {
     fn to_posting(job: FeedJob, locations: Vec<String>, board: &BoardConfig) -> Posting {
         let workplace_type = infer_workplace(&locations);
         let comp = Comp::None;
-        let hash = content_hash(&job.name, &locations, workplace_type, &comp, "");
+        let hash = content_hash(
+            &job.name,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            "",
+        );
 
         Posting {
             ats: board.ats,
@@ -128,6 +135,7 @@ impl RipplingAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: None, // the feed carries no date; the detail's createdOn is the truth
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -152,6 +160,7 @@ impl RipplingAdapter {
             &jp.work_locations,
             workplace_type,
             &comp,
+            Equity::None,
             &description,
         );
 
@@ -165,6 +174,7 @@ impl RipplingAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::rfc3339("rippling createdOn", jp.created_on.as_deref())?,
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -188,7 +198,12 @@ impl Adapter for RipplingAdapter {
         http: &HttpClient,
         board: &BoardConfig,
     ) -> Result<Vec<Posting>, AdapterError> {
-        let body = http.get_text(&Self::list_url(board.token.as_str())).await?;
+        let body = http
+            .get_text(
+                &Self::list_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
+            .await?;
         Self::parse_feed(&body, board)
     }
 
@@ -204,7 +219,7 @@ impl Adapter for RipplingAdapter {
             board.token.as_str(),
             req_id
         );
-        let html = http.get_text(&url).await?;
+        let html = http.get_text(&url, &FetchCtx::from_board(board)).await?;
         Self::parse_detail(&html, board)
     }
 }

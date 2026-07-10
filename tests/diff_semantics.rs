@@ -7,8 +7,8 @@
 use chrono::{DateTime, Utc};
 use job_board_mcp::config::BoardConfig;
 use job_board_mcp::model::{
-    Ats, AtsToken, BoardId, Comp, CompInterval, CompSource, Currency, ObitKind, Posting, ReqId,
-    WorkplaceType, content_hash,
+    Ats, AtsToken, BoardId, Comp, CompInterval, CompSource, Currency, Equity, ObitKind, Posting,
+    ReqId, WorkplaceType, content_hash,
 };
 use job_board_mcp::store::{BoardDiff, ChangedPosting, Store};
 
@@ -69,6 +69,7 @@ impl Build {
             workplace_type: self.workplace,
             remote_scope: None,
             comp: self.comp.clone(),
+            equity: Equity::None,
             posted_at: None,
             updated_at: self.updated_at,
             updated_at_unreliable: false,
@@ -79,6 +80,7 @@ impl Build {
                 &self.locations,
                 self.workplace,
                 &self.comp,
+                Equity::None,
                 self.description,
             ),
         }

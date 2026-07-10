@@ -55,7 +55,16 @@ async fn main() -> Result<()> {
         .connect_with(options)
         .await
         .context("opening the scratch schema database")?;
-    sqlx::migrate!("./migrations")
+    // Read the migrations at build-script RUNTIME rather than embedding them with
+    // `migrate!`. The macro bakes the migration list into this script at ITS compile
+    // time, so adding a migration file only re-RUNS the cached script (against a stale
+    // embedded set) and `query!` type-checks against a schema missing the new table.
+    // `Migrator::new(Path)` re-reads the directory every run, so a new migration lands
+    // without a `touch build.rs` dance.
+    let migrator = sqlx::migrate::Migrator::new(Path::new("./migrations"))
+        .await
+        .context("reading the migrations directory")?;
+    migrator
         .run(&pool)
         .await
         .context("running migrations against the scratch schema")?;

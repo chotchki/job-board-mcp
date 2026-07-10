@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::config::BoardConfig;
-use crate::model::{BoardId, ObitKind, Posting, ReqId};
+use crate::model::{Ats, BoardId, ObitKind, Posting, ReqId};
 
 /// Things that go wrong opening, migrating, or writing the store.
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +59,44 @@ pub struct ObitRecord {
     pub kind: ObitKind,
     pub reason: String,
     pub marked_at: String,
+}
+
+/// A raw response to record in the capture ledger. Borrows everything so the (possibly
+/// large) body is never copied on the way in.
+pub struct RawCapture<'a> {
+    pub board_id: &'a BoardId,
+    pub ats: Ats,
+    pub url: &'a str,
+    pub method: &'a str,
+    pub request_body: Option<&'a str>,
+    pub status: u16,
+    pub body: &'a str,
+}
+
+/// A capture ledger row WITHOUT its body — the metadata `list_captures` returns for
+/// audit, so listing the ledger never drags hundreds of KB of bodies into memory.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureMeta {
+    pub id: i64,
+    pub board_id: BoardId,
+    pub ats: Ats,
+    pub url: String,
+    pub method: String,
+    pub status: i64,
+    pub captured_at: String,
+    /// Body length in bytes — the size of the sample without carrying the sample itself.
+    pub bytes: i64,
+}
+
+/// A capture ledger row WITH its body — what `dump_captures` reads to write sample files.
+#[derive(Debug)]
+pub struct CaptureRecord {
+    pub id: i64,
+    pub board_id: BoardId,
+    pub ats: Ats,
+    pub url: String,
+    pub captured_at: String,
+    pub body: String,
 }
 
 /// The stored material fields of a posting, as strings, for change detection. Comparing
@@ -494,12 +532,122 @@ impl Store {
             })
             .collect())
     }
+
+    /// Record a raw response and, in the same call, purge anything older than the
+    /// retention window — both stamped at the caller-supplied `captured_at`, because the
+    /// store reads no clock. Best-effort by contract: the HTTP layer treats a failure
+    /// here as non-fatal, so a capture write never breaks the fetch it rode in on.
+    pub async fn record_capture(
+        &self,
+        capture: &RawCapture<'_>,
+        captured_at: DateTime<Utc>,
+        retain_days: u32,
+    ) -> Result<(), StoreError> {
+        let board = capture.board_id.as_str();
+        let ats = json(&capture.ats);
+        let status = i64::from(capture.status);
+        let captured = captured_at.to_rfc3339();
+        sqlx::query!(
+            "INSERT INTO raw_captures
+                 (board_id, ats, url, method, request_body, status, captured_at, body)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            board,
+            ats,
+            capture.url,
+            capture.method,
+            capture.request_body,
+            status,
+            captured,
+            capture.body,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+
+        // Sweep everything past the window. RFC3339 in a single (UTC) offset sorts
+        // lexicographically, which is why a string comparison is a valid time comparison.
+        let cutoff = (captured_at - chrono::Duration::days(i64::from(retain_days))).to_rfc3339();
+        sqlx::query!("DELETE FROM raw_captures WHERE captured_at < ?1", cutoff)
+            .execute(&self.pool)
+            .await
+            .map_err(StoreError::Write)?;
+        Ok(())
+    }
+
+    /// The capture ledger, newest first, metadata only (no bodies). Scoped to one board or
+    /// all boards, capped at `limit`.
+    pub async fn list_captures(
+        &self,
+        board_id: Option<&BoardId>,
+        limit: i64,
+    ) -> Result<Vec<CaptureMeta>, StoreError> {
+        let filter = board_id.map(BoardId::as_str);
+        let rows = sqlx::query!(
+            r#"SELECT id AS "id!", board_id, ats, url, method, status,
+                      captured_at, LENGTH(body) AS "bytes!: i64"
+               FROM raw_captures
+               WHERE ?1 IS NULL OR board_id = ?1
+               ORDER BY captured_at DESC, id DESC
+               LIMIT ?2"#,
+            filter,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| CaptureMeta {
+                id: r.id,
+                board_id: BoardId::new(r.board_id),
+                ats: serde_json::from_str(&r.ats).expect("ats is JSON we wrote"),
+                url: r.url,
+                method: r.method,
+                status: r.status,
+                captured_at: r.captured_at,
+                bytes: r.bytes,
+            })
+            .collect())
+    }
+
+    /// The capture ledger WITH bodies, newest first — what `dump_captures` reads to write
+    /// sample files. Same scoping and `limit` as [`list_captures`](Self::list_captures).
+    pub async fn dump_captures(
+        &self,
+        board_id: Option<&BoardId>,
+        limit: i64,
+    ) -> Result<Vec<CaptureRecord>, StoreError> {
+        let filter = board_id.map(BoardId::as_str);
+        let rows = sqlx::query!(
+            r#"SELECT id AS "id!", board_id, ats, url, captured_at, body
+               FROM raw_captures
+               WHERE ?1 IS NULL OR board_id = ?1
+               ORDER BY captured_at DESC, id DESC
+               LIMIT ?2"#,
+            filter,
+            limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| CaptureRecord {
+                id: r.id,
+                board_id: BoardId::new(r.board_id),
+                ats: serde_json::from_str(&r.ats).expect("ats is JSON we wrote"),
+                url: r.url,
+                captured_at: r.captured_at,
+                body: r.body,
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Ats, AtsToken, Comp, ReqId, WorkplaceType, content_hash};
+    use crate::model::{Ats, AtsToken, Comp, Equity, ReqId, WorkplaceType, content_hash};
 
     fn board() -> BoardConfig {
         BoardConfig {
@@ -524,6 +672,7 @@ mod tests {
             workplace_type: WorkplaceType::Remote,
             remote_scope: None,
             comp: comp.clone(),
+            equity: Equity::None,
             posted_at: None,
             updated_at: None,
             updated_at_unreliable: false,
@@ -534,6 +683,7 @@ mod tests {
                 &["Remote".to_owned()],
                 WorkplaceType::Remote,
                 &comp,
+                Equity::None,
                 "",
             ),
         }
@@ -771,5 +921,77 @@ mod tests {
         let diff = store.diff_board(&id).await.unwrap();
         // Only the real posting is NEW; the ghost is suppressed.
         assert_eq!(diff.new, vec![ReqId::new("real-1")]);
+    }
+
+    fn cap<'a>(board: &'a BoardId, body: &'a str) -> RawCapture<'a> {
+        RawCapture {
+            board_id: board,
+            ats: Ats::Greenhouse,
+            url: "https://boards-api.greenhouse.io/x/jobs",
+            method: "GET",
+            request_body: None,
+            status: 200,
+            body,
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_records_and_lists_metadata_without_the_body() {
+        let store = Store::open_in_memory().await.unwrap();
+        let id = BoardId::new("gitlab");
+        store
+            .record_capture(&cap(&id, r#"{"jobs":[]}"#), day(0), 7)
+            .await
+            .unwrap();
+
+        let metas = store.list_captures(Some(&id), 10).await.unwrap();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].ats, Ats::Greenhouse);
+        assert_eq!(metas[0].status, 200);
+        // The size of the sample travels; the sample itself does not.
+        assert_eq!(metas[0].bytes, r#"{"jobs":[]}"#.len() as i64);
+    }
+
+    #[tokio::test]
+    async fn capture_purges_everything_past_the_retention_window() {
+        let store = Store::open_in_memory().await.unwrap();
+        let id = BoardId::new("gitlab");
+        // An old capture, then a new one ten days later under a 7-day window: recording
+        // the new one sweeps the old, so the ledger self-bounds without a cron.
+        store
+            .record_capture(&cap(&id, "old"), day(0), 7)
+            .await
+            .unwrap();
+        store
+            .record_capture(&cap(&id, "new"), day(10), 7)
+            .await
+            .unwrap();
+
+        let metas = store.list_captures(None, 100).await.unwrap();
+        assert_eq!(
+            metas.len(),
+            1,
+            "day-0 capture is past the 7-day window at day 10"
+        );
+        let dumped = store.dump_captures(None, 100).await.unwrap();
+        assert_eq!(dumped.len(), 1);
+        assert_eq!(dumped[0].body, "new");
+    }
+
+    #[tokio::test]
+    async fn capture_list_is_scoped_by_board() {
+        let store = Store::open_in_memory().await.unwrap();
+        let a = BoardId::new("alpha");
+        let b = BoardId::new("beta");
+        store
+            .record_capture(&cap(&a, "a"), day(0), 7)
+            .await
+            .unwrap();
+        store
+            .record_capture(&cap(&b, "b"), day(0), 7)
+            .await
+            .unwrap();
+        assert_eq!(store.list_captures(Some(&a), 100).await.unwrap().len(), 1);
+        assert_eq!(store.list_captures(None, 100).await.unwrap().len(), 2);
     }
 }

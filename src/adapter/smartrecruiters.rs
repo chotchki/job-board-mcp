@@ -10,8 +10,8 @@ use serde::Deserialize;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::http::{FetchCtx, HttpClient};
+use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
 
 const PAGE_LIMIT: i64 = 100;
 const MAX_POSTINGS: usize = 10_000;
@@ -113,7 +113,14 @@ impl SmartRecruitersAdapter {
             .into_iter()
             .collect();
         let comp = Comp::None;
-        let hash = content_hash(&raw.name, &locations, workplace_type, &comp, "");
+        let hash = content_hash(
+            &raw.name,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            "",
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -129,6 +136,7 @@ impl SmartRecruitersAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::rfc3339(
                 "smartrecruiters releasedDate",
                 raw.released_date.as_deref(),
@@ -152,7 +160,12 @@ impl Adapter for SmartRecruitersAdapter {
         let mut postings = Vec::new();
         let mut offset: i64 = 0;
         loop {
-            let body = http.get_text(&Self::postings_url(token, offset)).await?;
+            let body = http
+                .get_text(
+                    &Self::postings_url(token, offset),
+                    &FetchCtx::from_board(board),
+                )
+                .await?;
             let (page, total) = Self::parse_page(&body, board)?;
             let page_len = page.len();
             postings.extend(page);
@@ -175,7 +188,10 @@ impl Adapter for SmartRecruitersAdapter {
         req_id: &ReqId,
     ) -> Result<PostingDetail, AdapterError> {
         let body = http
-            .get_text(&Self::detail_url(board.token.as_str(), req_id))
+            .get_text(
+                &Self::detail_url(board.token.as_str(), req_id),
+                &FetchCtx::from_board(board),
+            )
             .await?;
         let detail: Detail = serde_json::from_str(&body)
             .map_err(|e| AdapterError::drift("smartrecruiters posting detail", e.to_string()))?;

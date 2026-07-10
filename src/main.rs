@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use job_board_mcp::clock;
 use job_board_mcp::config::{self, Config};
 use job_board_mcp::http::{HttpClient, HttpConfig};
 use job_board_mcp::server::JobBoardServer;
@@ -56,9 +58,11 @@ async fn main() -> Result<()> {
             .with_context(|| format!("creating the store directory {}", parent.display()))?;
     }
 
-    let store = Store::open(&db_path)
-        .await
-        .with_context(|| format!("opening the store at {}", db_path.display()))?;
+    let store = Arc::new(
+        Store::open(&db_path)
+            .await
+            .with_context(|| format!("opening the store at {}", db_path.display()))?,
+    );
     // Mirror the config's boards so snapshots/postings have something to reference. The
     // config file remains the source of truth.
     for board in &config.boards {
@@ -68,9 +72,17 @@ async fn main() -> Result<()> {
             .context("mirroring a board")?;
     }
 
-    let http = HttpClient::new(HttpConfig::default()).context("building the HTTP client")?;
+    let mut http = HttpClient::new(HttpConfig::default()).context("building the HTTP client")?;
+    // Wire raw-response capture unless the window is zero (off). The store handle is
+    // shared, and the clock injected here is the one sanctioned reader — the store still
+    // takes every timestamp as a parameter, so its diffs stay deterministic.
+    if config.raw_capture_days > 0 {
+        http = http.with_capture(store.clone(), config.raw_capture_days, clock::now);
+    }
 
-    let service = JobBoardServer::new(store, http, config.boards)
+    // Samples default to landing next to the database.
+    let db_dir = db_path.parent().map(Path::to_owned).unwrap_or_default();
+    let service = JobBoardServer::new(store, http, config.boards, db_dir)
         .serve(stdio())
         .await?;
     service.waiting().await?;

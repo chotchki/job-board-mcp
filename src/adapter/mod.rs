@@ -149,7 +149,7 @@ pub trait Adapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Ats, AtsToken, Comp, ContentHash, WorkplaceType};
+    use crate::model::{Ats, AtsToken, Comp, ContentHash, Equity, WorkplaceType};
 
     // Proves the trait is implementable with a plain `async fn` body and that its
     // futures are Send (they're awaited across a spawn below).
@@ -171,6 +171,7 @@ mod tests {
                 workplace_type: WorkplaceType::Unknown,
                 remote_scope: None,
                 comp: Comp::None,
+                equity: Equity::None,
                 posted_at: None,
                 updated_at: None,
                 updated_at_unreliable: board.updated_at_unreliable,

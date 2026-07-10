@@ -67,3 +67,21 @@
 - [x] F.4 - github.careers (?query= ignored server-side; no-results i18n grep trap)
 - [x] F.5 - Workable adapter — blocked on a real populated board
 
+---
+
+## 2026-07-10
+
+## Phase G - Equity comp modeling
+added 2026-07-10.
+- [x] G.1 - G.1 - Equity type: None/Offered/CashValue/Percent + validated ctors and tests
+- [x] G.2 - G.2 - Fold equity into Posting + content_hash (skip-when-none keeps hashes stable)
+- [x] G.3 - G.3 - Ashby: emit CashValue, Offered for null/Percentage; fixture + tests
+- [x] G.4 - G.4 - Docs: README quirk table + SPEC comp section for equity axis
+
+## Phase H - Raw request/response capture ledger
+- [x] H.1 - H.1 - raw_captures schema (migration 0002) + Store capture/purge/list methods
+- [x] H.2 - H.2 - Capture at the http send_gated chokepoint via FetchCtx
+- [x] H.3 - H.3 - Config raw_capture_days (default 7, 0=off); wire into HttpClient
+- [x] H.4 - H.4 - dump_captures MCP tool: write sample files to disk, return paths
+- [x] H.5 - H.5 - Capture docs + tests; version bump 0.4.0 + install
+

@@ -25,8 +25,8 @@ use serde_json::json;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::http::{FetchCtx, HttpClient};
+use crate::model::{Comp, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
 
 const PAGE_LIMIT: i64 = 20;
 // A board with more than this many postings gets truncated rather than looping forever;
@@ -132,7 +132,14 @@ impl WorkdayAdapter {
         })?;
         let locations: Vec<String> = jp.locations_text.into_iter().collect();
         let comp = Comp::None;
-        let hash = content_hash(&jp.title, &locations, WorkplaceType::Unknown, &comp, "");
+        let hash = content_hash(
+            &jp.title,
+            &locations,
+            WorkplaceType::Unknown,
+            &comp,
+            Equity::None,
+            "",
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -144,6 +151,7 @@ impl WorkdayAdapter {
             workplace_type: WorkplaceType::Unknown,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: None, // list `postedOn` is relative text; the real date is in detail
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -163,7 +171,14 @@ impl WorkdayAdapter {
         let workplace_type = infer_workplace(&locations);
         let comp = Comp::None;
         let description = info.job_description.clone().unwrap_or_default();
-        let hash = content_hash(&info.title, &locations, workplace_type, &comp, &description);
+        let hash = content_hash(
+            &info.title,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            &description,
+        );
 
         let posting = Posting {
             ats: board.ats,
@@ -175,6 +190,7 @@ impl WorkdayAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::date("workday startDate", info.start_date.as_deref())?,
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -208,6 +224,7 @@ impl Adapter for WorkdayAdapter {
                 .post_json(
                     &url,
                     &json!({ "appliedFacets": {}, "limit": PAGE_LIMIT, "offset": offset, "searchText": "" }),
+                    &FetchCtx::from_board(board),
                 )
                 .await?;
             let (page, total) = Self::parse_page(&body, board, host, site)?;
@@ -244,6 +261,7 @@ impl Adapter for WorkdayAdapter {
             .post_json(
                 &Self::jobs_url(host, site),
                 &json!({ "appliedFacets": {}, "limit": PAGE_LIMIT, "offset": 0, "searchText": req_id.as_str() }),
+                &FetchCtx::from_board(board),
             )
             .await?;
         let found: JobsResponse = serde_json::from_str(&search)
@@ -256,7 +274,10 @@ impl Adapter for WorkdayAdapter {
             .ok_or_else(|| AdapterError::PostingNotFound(req_id.clone()))?;
 
         let body = http
-            .get_text(&Self::detail_url(host, site, &external_path))
+            .get_text(
+                &Self::detail_url(host, site, &external_path),
+                &FetchCtx::from_board(board),
+            )
             .await?;
         let parsed: DetailResponse = serde_json::from_str(&body)
             .map_err(|e| AdapterError::drift("workday job detail", e.to_string()))?;

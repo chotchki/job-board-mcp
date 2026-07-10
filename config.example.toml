@@ -7,6 +7,11 @@
 # Where the SQLite snapshot store lives. `~` expands at open time.
 db_path = "~/.local/share/job-board-mcp/store.sqlite"
 
+# Days of raw request/response captures to keep. Every successful fetch logs its raw
+# body, so you can `dump_captures` a real sample and hand it back when an adapter needs
+# building or fixing. Each write purges rows past this window. Set 0 to turn capture off.
+raw_capture_days = 7
+
 [[board]]
 id = "stripe"
 ats = "greenhouse"

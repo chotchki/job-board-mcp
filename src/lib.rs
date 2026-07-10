@@ -3,6 +3,7 @@
 //! See `SPEC.md` for the design, the change semantics and the per-platform quirk table.
 
 pub mod adapter;
+pub mod clock;
 pub mod config;
 pub mod http;
 pub mod model;

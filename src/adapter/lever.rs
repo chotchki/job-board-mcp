@@ -13,9 +13,9 @@ use serde::Deserialize;
 use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
-use crate::http::HttpClient;
+use crate::http::{FetchCtx, HttpClient};
 use crate::model::{
-    Comp, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType, content_hash,
+    Comp, CompSource, Currency, Equity, Posting, PostingDetail, ReqId, WorkplaceType, content_hash,
 };
 
 #[derive(Deserialize)]
@@ -108,7 +108,14 @@ impl LeverAdapter {
             .as_deref()
             .or(raw.description.as_deref())
             .unwrap_or_default();
-        let hash = content_hash(&raw.text, &locations, workplace_type, &comp, description);
+        let hash = content_hash(
+            &raw.text,
+            &locations,
+            workplace_type,
+            &comp,
+            Equity::None,
+            description,
+        );
 
         Ok(Posting {
             ats: board.ats,
@@ -120,6 +127,7 @@ impl LeverAdapter {
             workplace_type,
             remote_scope: None,
             comp,
+            equity: Equity::None,
             posted_at: parse::epoch_millis(raw.created_at),
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
@@ -136,7 +144,12 @@ impl Adapter for LeverAdapter {
         http: &HttpClient,
         board: &BoardConfig,
     ) -> Result<Vec<Posting>, AdapterError> {
-        let body = http.get_text(&Self::list_url(board.token.as_str())).await?;
+        let body = http
+            .get_text(
+                &Self::list_url(board.token.as_str()),
+                &FetchCtx::from_board(board),
+            )
+            .await?;
         Self::parse_postings(&body, board)
     }
 
@@ -147,7 +160,10 @@ impl Adapter for LeverAdapter {
         req_id: &ReqId,
     ) -> Result<PostingDetail, AdapterError> {
         let body = http
-            .get_text(&Self::detail_url(board.token.as_str(), req_id))
+            .get_text(
+                &Self::detail_url(board.token.as_str(), req_id),
+                &FetchCtx::from_board(board),
+            )
             .await
             .map_err(|e| super::not_found_on_404(e, req_id))?;
         Self::parse_detail(&body, board)
