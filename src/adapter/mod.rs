@@ -7,7 +7,7 @@ use std::future::Future;
 
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
-use crate::model::{BoardId, Posting, PostingDetail, ReqId};
+use crate::model::{Ats, BoardId, Posting, PostingDetail, ReqId};
 
 mod ashby;
 mod greenhouse;
@@ -61,6 +61,33 @@ impl AdapterError {
 /// One ATS's read-only view of a board. Async, and the futures are `Send` because they
 /// run inside the tokio server; the explicit `impl Future + Send` (rather than bare
 /// `async fn`) is what guarantees that at the trait boundary.
+/// Fetch a board's listing through the adapter for its ATS. This `match` is the whole
+/// dispatch — and because `Ats` is closed, a wave-2 platform can't be added without the
+/// compiler forcing a new arm here.
+pub async fn list_for(
+    http: &HttpClient,
+    board: &BoardConfig,
+) -> Result<Vec<Posting>, AdapterError> {
+    match board.ats {
+        Ats::Greenhouse => GreenhouseAdapter.list(http, board).await,
+        Ats::Ashby => AshbyAdapter.list(http, board).await,
+        Ats::Lever => LeverAdapter.list(http, board).await,
+    }
+}
+
+/// Fetch one posting's detail through the adapter for its ATS.
+pub async fn detail_for(
+    http: &HttpClient,
+    board: &BoardConfig,
+    req_id: &ReqId,
+) -> Result<PostingDetail, AdapterError> {
+    match board.ats {
+        Ats::Greenhouse => GreenhouseAdapter.detail(http, board, req_id).await,
+        Ats::Ashby => AshbyAdapter.detail(http, board, req_id).await,
+        Ats::Lever => LeverAdapter.detail(http, board, req_id).await,
+    }
+}
+
 pub trait Adapter {
     /// Fetch the board's current listing, normalized. A successful return is the ONLY
     /// thing that may become a snapshot. The `http` client is passed in so adapters stay

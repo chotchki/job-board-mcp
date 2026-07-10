@@ -32,7 +32,7 @@ pub enum WorkplaceType {
 /// Why a posting is suppressed from future NEW results. `ghost` is the load-bearing
 /// one: an aggregator listing that never existed on a primary source, which re-bites
 /// a scan endlessly without a ledger to remember it's a phantom.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ObitKind {
     Dead,

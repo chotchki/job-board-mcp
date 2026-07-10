@@ -144,6 +144,22 @@ impl Store {
         Ok(row.count)
     }
 
+    /// The time of the most recent snapshot for a board (RFC3339), or `None` if it's never
+    /// been fetched successfully.
+    pub async fn last_snapshot_at(&self, board_id: &BoardId) -> Result<Option<String>, StoreError> {
+        let board = board_id.as_str();
+        // MAX can be NULL (no snapshots), and sqlx can't infer a type for it — override to
+        // a nullable String.
+        let row = sqlx::query!(
+            r#"SELECT MAX(taken_at) AS "taken?: String" FROM snapshots WHERE board_id = ?1"#,
+            board,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        Ok(row.taken)
+    }
+
     /// Mirror a config board into the store so snapshots and postings have something to
     /// reference. The config file stays the source of truth; this refreshes the mirror.
     pub async fn upsert_board(&self, board: &BoardConfig) -> Result<(), StoreError> {
