@@ -5,19 +5,20 @@
 
 use std::fmt;
 
-use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
-/// A string identifier that serializes as its bare value (JSON + TOML) and stores
-/// as TEXT. One definition site for the boundary-crossing boilerplate, so the whole
-/// point of a newtype — that it's free — actually holds.
+/// A string identifier that serializes as its bare value (JSON + TOML) and, via
+/// `#[sqlx(transparent)]`, binds and decodes as TEXT. One definition site for the
+/// boundary-crossing boilerplate, so the whole point of a newtype — that it's free —
+/// actually holds.
 macro_rules! string_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
         #[derive(
-            Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+            Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type,
         )]
         #[serde(transparent)]
+        #[sqlx(transparent)]
         pub struct $name(String);
 
         impl $name {
@@ -45,18 +46,6 @@ macro_rules! string_id {
         impl From<String> for $name {
             fn from(value: String) -> Self {
                 Self(value)
-            }
-        }
-
-        impl FromSql for $name {
-            fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-                value.as_str().map(|s| Self(s.to_owned()))
-            }
-        }
-
-        impl rusqlite::ToSql for $name {
-            fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-                Ok(ToSqlOutput::from(self.0.as_str()))
             }
         }
     };
@@ -134,23 +123,40 @@ impl<'de> Deserialize<'de> for ContentHash {
     }
 }
 
-impl FromSql for ContentHash {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        let s = value.as_str()?;
-        Self::from_hex(s).map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))
+// Stored as hex TEXT, delegating to `String`'s codec. Not `#[sqlx(transparent)]`,
+// because the wire/DB form is the hex string, not the raw `[u8; 32]`.
+impl sqlx::Type<sqlx::Sqlite> for ContentHash {
+    fn type_info() -> <sqlx::Sqlite as sqlx::Database>::TypeInfo {
+        <String as sqlx::Type<sqlx::Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<sqlx::Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
     }
 }
 
-impl rusqlite::ToSql for ContentHash {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.to_hex()))
+impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for ContentHash {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <sqlx::Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <String as sqlx::Encode<sqlx::Sqlite>>::encode(self.to_hex(), buf)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for ContentHash {
+    fn decode(
+        value: <sqlx::Sqlite as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let s = <String as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
+        Ok(Self::from_hex(&s)?)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
+    use sqlx::{Row, SqlitePool};
 
     #[test]
     fn string_id_serializes_transparently() {
@@ -169,27 +175,36 @@ mod tests {
         assert!(ContentHash::from_hex("zz").is_err());
     }
 
-    #[test]
-    fn ids_round_trip_through_sqlite() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("CREATE TABLE t (board TEXT, req TEXT, token TEXT, hash TEXT)")
+    // Proves the sqlx boundary for each id now, against an in-memory DB, rather than
+    // discovering an Encode/Decode gap when D.1 first writes a real query.
+    #[tokio::test]
+    async fn ids_round_trip_through_sqlite() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE t (board TEXT, req TEXT, token TEXT, hash TEXT)")
+            .execute(&pool)
+            .await
             .unwrap();
 
         let board = BoardId::new("stripe");
         let req = ReqId::new("4152884006");
         let token = AtsToken::new("stripe");
         let hash = ContentHash::from_bytes([7; 32]);
-        conn.execute(
-            "INSERT INTO t VALUES (?1, ?2, ?3, ?4)",
-            (&board, &req, &token, &hash),
-        )
-        .unwrap();
-
-        let (b, r, tk, h): (BoardId, ReqId, AtsToken, ContentHash) = conn
-            .query_row("SELECT board, req, token, hash FROM t", [], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
+        sqlx::query("INSERT INTO t VALUES (?, ?, ?, ?)")
+            .bind(&board)
+            .bind(&req)
+            .bind(&token)
+            .bind(hash)
+            .execute(&pool)
+            .await
             .unwrap();
-        assert_eq!((b, r, tk, h), (board, req, token, hash));
+
+        let row = sqlx::query("SELECT board, req, token, hash FROM t")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<BoardId, _>("board"), board);
+        assert_eq!(row.get::<ReqId, _>("req"), req);
+        assert_eq!(row.get::<AtsToken, _>("token"), token);
+        assert_eq!(row.get::<ContentHash, _>("hash"), hash);
     }
 }

@@ -10,7 +10,6 @@
 //! inside `#[test]` fns, so the real guard is the `i64` type, not the lint — the
 //! lint just backs it up in non-test code.
 
-use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
 /// Things that go wrong constructing compensation from untrusted board data.
@@ -83,16 +82,32 @@ impl From<Currency> for String {
     }
 }
 
-impl FromSql for Currency {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        let s = value.as_str()?;
-        Self::new(s).map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))
+// Stored as the 3-char code in TEXT, validated on the way back out.
+impl sqlx::Type<sqlx::Sqlite> for Currency {
+    fn type_info() -> <sqlx::Sqlite as sqlx::Database>::TypeInfo {
+        <String as sqlx::Type<sqlx::Sqlite>>::type_info()
+    }
+
+    fn compatible(ty: &<sqlx::Sqlite as sqlx::Database>::TypeInfo) -> bool {
+        <String as sqlx::Type<sqlx::Sqlite>>::compatible(ty)
     }
 }
 
-impl rusqlite::ToSql for Currency {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.as_str()))
+impl<'q> sqlx::Encode<'q, sqlx::Sqlite> for Currency {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <sqlx::Sqlite as sqlx::Database>::ArgumentBuffer<'q>,
+    ) -> Result<sqlx::encode::IsNull, sqlx::error::BoxDynError> {
+        <String as sqlx::Encode<sqlx::Sqlite>>::encode(self.as_str().to_owned(), buf)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Sqlite> for Currency {
+    fn decode(
+        value: <sqlx::Sqlite as sqlx::Database>::ValueRef<'r>,
+    ) -> Result<Self, sqlx::error::BoxDynError> {
+        let s = <String as sqlx::Decode<sqlx::Sqlite>>::decode(value)?;
+        Ok(Self::new(&s)?)
     }
 }
 
