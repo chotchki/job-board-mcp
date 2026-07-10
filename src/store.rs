@@ -6,13 +6,15 @@
 //! error, not a runtime surprise. `build.rs` migrates a scratch schema and points
 //! `DATABASE_URL` at it, so that check needs no committed query cache.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::config::BoardConfig;
-use crate::model::{BoardId, Posting};
+use crate::model::{BoardId, Posting, ReqId};
 
 /// Things that go wrong opening, migrating, or writing the store.
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +31,59 @@ pub enum StoreError {
 /// truth; SQLite just holds its serialization.
 fn json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("model types serialize")
+}
+
+/// The delta for one board: what a fetch produced, or what [`Store::diff_board`]
+/// reconstructs from the last two snapshots. Obit-suppressed rows are excluded (D.4).
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct BoardDiff {
+    /// req_ids first seen at the latest snapshot.
+    pub new: Vec<ReqId>,
+    /// req_ids whose material content changed, with the fields that moved.
+    pub changed: Vec<ChangedPosting>,
+    /// req_ids present in the previous snapshot but absent from the latest fetch.
+    pub dead: Vec<ReqId>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ChangedPosting {
+    pub req_id: ReqId,
+    pub changed_fields: Vec<String>,
+}
+
+/// The stored material fields of a posting, as strings, for change detection. Comparing
+/// serialized forms is exact (the encoding is canonical) and skips a round-trip through
+/// the typed values.
+struct StoredMaterial {
+    content_hash: String,
+    title: String,
+    locations: String,
+    workplace_type: String,
+    comp: String,
+}
+
+/// Which material fields moved between the stored posting and the incoming one. `url`,
+/// `posted_at` and `updated_at` are deliberately NOT here — they don't feed content_hash.
+/// If the hash moved but no named field did, the description changed (it's in the hash
+/// but not stored field-by-field), so it's named by elimination.
+fn changed_fields(old: &StoredMaterial, new: &Posting) -> Vec<String> {
+    let mut fields = Vec::new();
+    if old.title != new.title {
+        fields.push("title".to_owned());
+    }
+    if old.locations != json(&new.locations) {
+        fields.push("locations".to_owned());
+    }
+    if old.workplace_type != json(&new.workplace_type) {
+        fields.push("workplace_type".to_owned());
+    }
+    if old.comp != json(&new.comp) {
+        fields.push("comp".to_owned());
+    }
+    if fields.is_empty() && old.content_hash != new.content_hash.to_hex() {
+        fields.push("description".to_owned());
+    }
+    fields
 }
 
 /// A handle to the snapshot database.
@@ -140,6 +195,31 @@ impl Store {
         .id
         .expect("INSERT ... RETURNING id yields the new snapshot id");
 
+        // The previous fetch's state, read BEFORE the upsert overwrites it — this is what
+        // NEW vs CHANGED is measured against.
+        let stored: HashMap<String, StoredMaterial> = sqlx::query!(
+            "SELECT req_id, content_hash, title, locations, workplace_type, comp
+             FROM postings WHERE board_id = ?1",
+            board,
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(StoreError::Write)?
+        .into_iter()
+        .map(|r| {
+            (
+                r.req_id,
+                StoredMaterial {
+                    content_hash: r.content_hash,
+                    title: r.title,
+                    locations: r.locations,
+                    workplace_type: r.workplace_type,
+                    comp: r.comp,
+                },
+            )
+        })
+        .collect();
+
         for posting in postings {
             let req_id = posting.req_id.as_str();
             let locations = json(&posting.locations);
@@ -148,6 +228,29 @@ impl Store {
             let content_hash = posting.content_hash.to_hex();
             let posted_at = posting.posted_at.map(|d| d.to_rfc3339());
             let updated_at = posting.updated_at.map(|d| d.to_rfc3339());
+
+            // A req we've seen before whose hash moved is CHANGED — record one version row
+            // with the field list. A NEW req (not in `stored`) gets no version row; its
+            // first_seen in `postings` is what marks it new. An unchanged req: nothing.
+            if let Some(old) = stored.get(req_id) {
+                if old.content_hash != content_hash {
+                    let fields = json(&changed_fields(old, posting));
+                    sqlx::query!(
+                        "INSERT INTO posting_versions
+                             (board_id, req_id, seen_at, snapshot_id, changed_fields, content_hash)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        board,
+                        req_id,
+                        taken,
+                        snapshot_id,
+                        fields,
+                        content_hash,
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(StoreError::Write)?;
+                }
+            }
 
             // first_seen is set only on insert; on conflict it's preserved and last_seen
             // moves forward — so "when did we first see this req" survives forever.
@@ -194,6 +297,83 @@ impl Store {
 
         tx.commit().await.map_err(StoreError::Write)?;
         Ok(snapshot_id)
+    }
+
+    /// Reconstruct the delta of the latest snapshot vs the one before it, from stored
+    /// data alone — this is `diff_boards` for one board, and it does NOT fetch.
+    ///
+    /// - NEW  = postings whose first_seen is the latest snapshot's time.
+    /// - CHANGED = the version rows written at the latest snapshot, with their field lists.
+    /// - DEAD = postings whose last_seen is the PREVIOUS snapshot's time — alive up to the
+    ///   last fetch, untouched by the latest, so they've vanished from the feed. This is
+    ///   only about that one transition: a posting that died several fetches ago has an
+    ///   older last_seen and is not re-reported.
+    ///
+    /// With zero snapshots the diff is empty; with exactly one, everything is NEW and
+    /// nothing is DEAD (there's no prior to have vanished from).
+    pub async fn diff_board(&self, board_id: &BoardId) -> Result<BoardDiff, StoreError> {
+        let board = board_id.as_str();
+        let snaps = sqlx::query!(
+            "SELECT taken_at FROM snapshots WHERE board_id = ?1 ORDER BY id DESC LIMIT 2",
+            board,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+
+        let Some(latest) = snaps.first() else {
+            return Ok(BoardDiff::default());
+        };
+        let latest_taken = latest.taken_at.clone();
+        let prev_taken = snaps.get(1).map(|s| s.taken_at.clone());
+
+        let new = sqlx::query!(
+            "SELECT req_id FROM postings WHERE board_id = ?1 AND first_seen = ?2",
+            board,
+            latest_taken,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?
+        .into_iter()
+        .map(|r| ReqId::new(r.req_id))
+        .collect();
+
+        let changed = sqlx::query!(
+            "SELECT v.req_id AS req_id, v.changed_fields AS changed_fields
+             FROM posting_versions v
+             JOIN snapshots s ON s.id = v.snapshot_id
+             WHERE s.board_id = ?1 AND s.taken_at = ?2",
+            board,
+            latest_taken,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?
+        .into_iter()
+        .map(|r| ChangedPosting {
+            req_id: ReqId::new(r.req_id),
+            changed_fields: serde_json::from_str(&r.changed_fields)
+                .expect("changed_fields is JSON we wrote"),
+        })
+        .collect();
+
+        let dead = match prev_taken {
+            None => Vec::new(),
+            Some(prev) => sqlx::query!(
+                "SELECT req_id FROM postings WHERE board_id = ?1 AND last_seen = ?2",
+                board,
+                prev,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(StoreError::Write)?
+            .into_iter()
+            .map(|r| ReqId::new(r.req_id))
+            .collect(),
+        };
+
+        Ok(BoardDiff { new, changed, dead })
     }
 }
 
@@ -328,5 +508,94 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row.posting_count, 0);
+    }
+
+    async fn seeded() -> (Store, BoardId) {
+        let store = Store::open_in_memory().await.unwrap();
+        store.upsert_board(&board()).await.unwrap();
+        (store, BoardId::new("gitlab"))
+    }
+
+    #[tokio::test]
+    async fn first_snapshot_is_all_new() {
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(
+                &id,
+                day(0),
+                &[posting("1", "Engineer"), posting("2", "Designer")],
+            )
+            .await
+            .unwrap();
+        let diff = store.diff_board(&id).await.unwrap();
+        assert_eq!(diff.new, vec![ReqId::new("1"), ReqId::new("2")]);
+        assert!(diff.changed.is_empty());
+        assert!(diff.dead.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_retitled_posting_is_changed_with_the_field_named() {
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(&id, day(0), &[posting("1", "Engineer")])
+            .await
+            .unwrap();
+        // Same req, new title → CHANGED, and "title" is the field that moved.
+        store
+            .record_snapshot(&id, day(1), &[posting("1", "Senior Engineer")])
+            .await
+            .unwrap();
+
+        let diff = store.diff_board(&id).await.unwrap();
+        assert!(diff.new.is_empty(), "not new on the second sighting");
+        assert_eq!(diff.dead, Vec::<ReqId>::new());
+        assert_eq!(
+            diff.changed,
+            vec![ChangedPosting {
+                req_id: ReqId::new("1"),
+                changed_fields: vec!["title".to_owned()],
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_vanished_posting_is_dead() {
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(
+                &id,
+                day(0),
+                &[posting("1", "Engineer"), posting("2", "Designer")],
+            )
+            .await
+            .unwrap();
+        // Second fetch drops req 2.
+        store
+            .record_snapshot(&id, day(1), &[posting("1", "Engineer")])
+            .await
+            .unwrap();
+
+        let diff = store.diff_board(&id).await.unwrap();
+        assert_eq!(diff.dead, vec![ReqId::new("2")]);
+        assert!(diff.new.is_empty());
+        assert!(
+            diff.changed.is_empty(),
+            "req 1 was identical, so not changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_identical_refetch_shows_no_deltas() {
+        let (store, id) = seeded().await;
+        store
+            .record_snapshot(&id, day(0), &[posting("1", "Engineer")])
+            .await
+            .unwrap();
+        store
+            .record_snapshot(&id, day(1), &[posting("1", "Engineer")])
+            .await
+            .unwrap();
+        let diff = store.diff_board(&id).await.unwrap();
+        assert_eq!(diff, BoardDiff::default());
     }
 }
