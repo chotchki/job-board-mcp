@@ -6,7 +6,9 @@
 pub mod comp;
 pub mod enums;
 pub mod ids;
+pub mod posting;
 
 pub use comp::{Comp, CompError, CompInterval, CompSource, Currency};
 pub use enums::{Ats, ObitKind, WorkplaceType};
 pub use ids::{AtsToken, BoardId, ContentHash, ReqId};
+pub use posting::{Posting, PostingDetail, content_hash};

@@ -11,13 +11,15 @@
 
 disallowed-methods = [
     { path = "std::time::SystemTime::now", reason = "record time via an injected taken_at param; the MCP handler is the only clock reader" },
+    # chrono is now a direct dep (posted_at/updated_at are DateTime<Utc>), so these
+    # bans resolve and fire. posted_at/updated_at are DATA parsed from a board, never
+    # a clock read — so there should be no now() call anywhere; the ban enforces it.
+    { path = "chrono::Utc::now", reason = "non-deterministic; inject the clock (taken_at)" },
+    { path = "chrono::Local::now", reason = "non-deterministic; inject the clock (taken_at)" },
 
-    # DORMANT pre-bans — do NOT uncomment until the dep is a direct dependency.
-    # Clippy silently ignores a path it cannot resolve: no error, exit 0, even under
-    # -D warnings. So an inactive ban is indistinguishable from a typo'd one — green
-    # forever. Enable each in the same diff that adds its dependency, together with a
-    # call site that proves it fires.
-    # { path = "chrono::Utc::now",   reason = "non-deterministic; inject the clock" },
-    # { path = "chrono::Local::now", reason = "non-deterministic; inject the clock" },
-    # { path = "rand::random",       reason = "non-deterministic; thread a seeded Rng" },
+    # DORMANT pre-ban — do NOT uncomment until rand is a direct dependency. Clippy
+    # silently ignores a path it cannot resolve (no error, exit 0, even under -D
+    # warnings), so an inactive ban is indistinguishable from a typo'd one. Enable it
+    # in the same diff that adds rand, with a call site that proves it fires.
+    # { path = "rand::random", reason = "non-deterministic; thread a seeded Rng" },
 ]

@@ -11,7 +11,7 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 -->
 
 ## Phase B - Core model
-- [ ] B.1 - Posting + PostingDetail: serde(default) + skip_serializing_if on every optional, NO deny_unknown_fields (cross-version machine data); content_hash over material fields via a canonical encoding, never derive(Hash) on memory layout; round-trip tests assert struct-eq not bytes, plus a pinned content_hash known-answer vector; synthetic Postings built through serde_json (never format!), absolute paths branched on cfg!(windows)
+- [x] B.1 - Posting + PostingDetail: serde(default) + skip_serializing_if on every optional, NO deny_unknown_fields (cross-version machine data); content_hash over material fields via a canonical encoding, never derive(Hash) on memory layout; round-trip tests assert struct-eq not bytes, plus a pinned content_hash known-answer vector; synthetic Postings built through serde_json (never format!), absolute paths branched on cfg!(windows)
 - [ ] B.2 - BoardConfig TOML + config.example.toml (db_path, per-board comp_site_only + updated_at_unreliable): serde(default) for forward-compat AND deny_unknown_fields — config is human-authored and single-reader, so a typo'd key must fail LOUD rather than silently default; test that example.toml parses and that an old-shape config loads with new fields defaulting
 - [ ] B.3 - Adapter trait + error taxonomy (UnknownBoard, BoardUnreachable{status}, ParseDrift — ParseDrift fails loudly, never guesses fields)
 - [ ] B.4 - HTTP layer: desktop-browser UA, per-host serialization + politeness delay, hard timeouts, no retry storms
