@@ -12,9 +12,10 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 
 ## Phase F - Adapters wave 2 (post-v0.1)
 - [x] F.1 - workday (CXS POST search; startDate = post date; maintenance mode → BoardUnreachable, never an empty board)
-- [ ] F.2 - workable + smartrecruiters
+- [x] F.2 - workable + smartrecruiters
 - [ ] F.3 - rippling (feed = listing source, __NEXT_DATA__ = per-job ground truth)
 - [ ] F.4 - github.careers (?query= ignored server-side; no-results i18n grep trap)
+- [ ] F.5 - Workable adapter — blocked on a real populated board
 
 ## Backlog (not yet phased)
 

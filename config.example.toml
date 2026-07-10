@@ -35,3 +35,8 @@ site = "NVIDIAExternalCareerSite"
 id = "example-on-smartrecruiters"
 ats = "smartrecruiters"
 token = "Visa"           # the company identifier (case-sensitive)
+
+[[board]]
+id = "rippling"
+ats = "rippling"
+token = "rippling"          # the board slug in ats.rippling.com/{slug}

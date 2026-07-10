@@ -1,0 +1,37 @@
+{
+  "props": {
+    "pageProps": {
+      "apiData": {
+        "jobPost": {
+          "uuid": "2f0674e6-f01f-4ecd-b459-e947241c211f",
+          "name": "Account Executive - Accountants Channel (East Coast)",
+          "description": {
+            "company": "<meta><h2 style=\"font-family:&quot;Basel Grotesk&quot;,Arial,sans-serif;line-height:1.6;font-size:15",
+            "role": "<meta><h2 style=\"font-family:&quot;Basel Grotesk&quot;,Arial,sans-serif;line-height:1.6;font-size:15"
+          },
+          "workLocations": [
+            "New York, NY",
+            "Remote (Massachusetts, US)",
+            "Remote (Connecticut, US)",
+            "Remote (New Jersey, US)"
+          ],
+          "department": {
+            "name": "Channel Sales Account Executives",
+            "base_department": "Sales",
+            "department_tree": [
+              "Sales",
+              "Channel Sales Account Executives"
+            ]
+          },
+          "employmentType": {
+            "label": "SALARIED_FT",
+            "id": "Salaried, full-time"
+          },
+          "createdOn": "2023-10-31T10:40:35.194000-07:00",
+          "url": "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f",
+          "payRangeDetails": []
+        }
+      }
+    }
+  }
+}

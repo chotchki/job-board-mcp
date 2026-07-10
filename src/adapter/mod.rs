@@ -13,12 +13,14 @@ mod ashby;
 mod greenhouse;
 mod lever;
 mod parse;
+mod rippling;
 mod smartrecruiters;
 mod workday;
 
 pub use ashby::AshbyAdapter;
 pub use greenhouse::GreenhouseAdapter;
 pub use lever::LeverAdapter;
+pub use rippling::RipplingAdapter;
 pub use smartrecruiters::SmartRecruitersAdapter;
 pub use workday::WorkdayAdapter;
 
@@ -78,6 +80,7 @@ pub async fn list_for(
         Ats::Lever => LeverAdapter.list(http, board).await,
         Ats::Workday => WorkdayAdapter.list(http, board).await,
         Ats::SmartRecruiters => SmartRecruitersAdapter.list(http, board).await,
+        Ats::Rippling => RipplingAdapter.list(http, board).await,
     }
 }
 
@@ -93,6 +96,7 @@ pub async fn detail_for(
         Ats::Lever => LeverAdapter.detail(http, board, req_id).await,
         Ats::Workday => WorkdayAdapter.detail(http, board, req_id).await,
         Ats::SmartRecruiters => SmartRecruitersAdapter.detail(http, board, req_id).await,
+        Ats::Rippling => RipplingAdapter.detail(http, board, req_id).await,
     }
 }
 

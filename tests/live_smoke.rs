@@ -11,7 +11,7 @@
 //! if one empties out, that's worth knowing too (it likely moved off the ATS).
 
 use job_board_mcp::adapter::{
-    Adapter, AshbyAdapter, GreenhouseAdapter, LeverAdapter, SmartRecruitersAdapter,
+    Adapter, AshbyAdapter, GreenhouseAdapter, LeverAdapter, RipplingAdapter, SmartRecruitersAdapter,
 };
 use job_board_mcp::config::BoardConfig;
 use job_board_mcp::http::{HttpClient, HttpConfig};
@@ -104,4 +104,19 @@ async fn smartrecruiters_live() {
     let board = board("visa", Ats::SmartRecruiters, "Visa");
     let postings = SmartRecruitersAdapter.list(&http, &board).await.unwrap();
     assert_well_formed(&postings, "Visa");
+}
+
+#[tokio::test]
+#[ignore = "hits the live rippling API + a job page; run with --ignored"]
+async fn rippling_live() {
+    let http = HttpClient::new(HttpConfig::default()).unwrap();
+    let board = board("rippling", Ats::Rippling, "rippling");
+    let postings = RipplingAdapter.list(&http, &board).await.unwrap();
+    assert_well_formed(&postings, "rippling");
+    // Exercise the __NEXT_DATA__ detail path against a real job page.
+    let detail = RipplingAdapter
+        .detail(&http, &board, &postings[0].req_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.posting.req_id, postings[0].req_id);
 }

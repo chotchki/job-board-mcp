@@ -1,0 +1,28 @@
+[
+  {
+    "uuid": "2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "name": "Account Executive - Accountants Channel (East Coast)",
+    "department": {
+      "id": "Sales",
+      "label": "Sales"
+    },
+    "url": "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "workLocation": {
+      "label": "New York, NY",
+      "id": "New York, NY"
+    }
+  },
+  {
+    "uuid": "2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "name": "Account Executive - Accountants Channel (East Coast)",
+    "department": {
+      "id": "Sales",
+      "label": "Sales"
+    },
+    "url": "https://ats.rippling.com/rippling/jobs/2f0674e6-f01f-4ecd-b459-e947241c211f",
+    "workLocation": {
+      "label": "Remote (Massachusetts, US)",
+      "id": "Remote (Massachusetts, US)"
+    }
+  }
+]
