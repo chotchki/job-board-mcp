@@ -4,5 +4,6 @@
 
 pub mod adapter;
 pub mod config;
+pub mod http;
 pub mod model;
 pub mod server;
