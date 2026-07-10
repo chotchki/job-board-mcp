@@ -144,3 +144,9 @@ Rust, using [rmcp](https://github.com/modelcontextprotocol/rust-sdk) (the offici
 ## Success criterion
 
 One `diff_boards()` call returns the same deltas a morning's agent fleet would have found on adapter-covered boards, with zero field errors — validated by running both side by side on a real morning before the fleet retires. Not a benchmark, a replacement test.
+
+<!-- NOTE (v0.1): this side-by-side replacement test is the one success criterion NOT yet
+exercised — it needs a real morning against the private watch list, which is a post-tag
+validation run, not a build step. Everything it depends on (the six tools, the diff, the
+adapters) is built and tested. -->
+
