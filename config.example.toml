@@ -11,7 +11,9 @@ db_path = "~/.local/share/job-board-mcp/store.sqlite"
 id = "stripe"
 ats = "greenhouse"
 token = "stripe"
-comp_site_only = true          # bands publish on stripe.com, never in the greenhouse API
+comp_site_only = true          # mostly true: a minority of postings (pay-transparency
+                               # jurisdictions) embed a band inline, but the API has no
+                               # structured pay field, so the band is Comp::SiteOnly
 
 [[board]]
 id = "openai"
@@ -31,10 +33,13 @@ ats = "workday"
 token = "nvidia.wd5.myworkdayjobs.com"
 site = "NVIDIAExternalCareerSite"
 
+# SmartRecruiters: `token` is the company identifier. Canonical case is the convention,
+# but it resolves case-insensitively. (Visa is only a residual test presence here — their
+# real pipeline moved elsewhere; it's an adapter demo, not a "watch Visa hiring" example.)
 [[board]]
 id = "example-on-smartrecruiters"
 ats = "smartrecruiters"
-token = "Visa"           # the company identifier (case-sensitive)
+token = "Visa"
 
 [[board]]
 id = "rippling"

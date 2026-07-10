@@ -206,6 +206,30 @@ impl Store {
         let taken = taken_at.to_rfc3339();
         let count = postings.len() as i64;
 
+        // A board that HAD postings and is now empty is the silent-migration shape: Lever
+        // and Workable return 200 + [] when a company moves off, indistinguishable from a
+        // genuinely-empty board. We still record it (an empty board is legitimate), but
+        // warn — the drop from non-empty to empty is exactly the maintenance-mode signal
+        // worth a human's eyes.
+        if count == 0 {
+            let prev = sqlx::query!(
+                "SELECT posting_count FROM snapshots WHERE board_id = ?1 ORDER BY id DESC LIMIT 1",
+                board,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(StoreError::Write)?;
+            if let Some(row) = prev {
+                if row.posting_count > 0 {
+                    tracing::warn!(
+                        board = %board_id,
+                        previous = row.posting_count,
+                        "board returned zero postings after a non-empty snapshot — possible migration off this ATS"
+                    );
+                }
+            }
+        }
+
         let mut tx = self.pool.begin().await.map_err(StoreError::Write)?;
 
         let snapshot_id = sqlx::query!(

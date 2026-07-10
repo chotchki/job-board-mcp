@@ -85,10 +85,16 @@ pub fn content_hash(
     comp: &Comp,
     description: &str,
 ) -> ContentHash {
-    let description_hash = blake3::hash(description.as_bytes()).to_hex().to_string();
+    // Trim leading/trailing whitespace so an ATS that pads a title one day and trims it
+    // the next doesn't read as a CHANGED — the whitespace isn't a real content change.
+    let title = title.trim();
+    let locations: Vec<String> = locations.iter().map(|l| l.trim().to_owned()).collect();
+    let description_hash = blake3::hash(description.trim().as_bytes())
+        .to_hex()
+        .to_string();
     let material = MaterialFields {
         title,
-        locations,
+        locations: &locations,
         workplace_type,
         comp,
         description_hash,

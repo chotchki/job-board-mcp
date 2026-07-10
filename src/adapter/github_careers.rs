@@ -19,7 +19,10 @@ use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
-use crate::model::{Comp, Posting, PostingDetail, ReqId, WorkplaceType, content_hash};
+use crate::model::{
+    Comp, CompInterval, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType,
+    content_hash,
+};
 
 const PAGE_LIMIT: i64 = 100;
 const MAX_POSTINGS: usize = 10_000;
@@ -51,6 +54,10 @@ struct JobData {
     department: Option<String>,
     #[serde(default)]
     apply_url: Option<String>,
+    #[serde(default)]
+    salary_min_value: Option<serde_json::Number>,
+    #[serde(default)]
+    salary_max_value: Option<serde_json::Number>,
 }
 
 pub struct GithubCareersAdapter;
@@ -75,7 +82,10 @@ impl GithubCareersAdapter {
     fn to_posting(data: JobData, board: &BoardConfig) -> Result<Posting, AdapterError> {
         let locations: Vec<String> = data.location_name.clone().into_iter().collect();
         let workplace_type = infer_workplace(&locations);
-        let comp = Comp::None;
+        let comp = github_comp(
+            data.salary_min_value.as_ref(),
+            data.salary_max_value.as_ref(),
+        )?;
         // The description is in the list, so it counts toward the change key.
         let description = data.description.clone().unwrap_or_default();
         let hash = content_hash(&data.title, &locations, workplace_type, &comp, &description);
@@ -168,6 +178,34 @@ impl Adapter for GithubCareersAdapter {
     }
 }
 
+/// github.careers exposes `salary_min_value`/`salary_max_value` but no currency or
+/// interval. This is GitHub's OWN single US board, so those are annual USD — a documented
+/// board-specific fact, not a guess in the wild. Zero means "not published" → `None`.
+fn github_comp(
+    min: Option<&serde_json::Number>,
+    max: Option<&serde_json::Number>,
+) -> Result<Comp, AdapterError> {
+    let usd = Currency::new("USD").expect("USD is valid");
+    let min = parse::number_to_minor("github salary_min_value", min, usd.minor_unit_exponent())?
+        .filter(|&v| v > 0);
+    let max = parse::number_to_minor("github salary_max_value", max, usd.minor_unit_exponent())?
+        .filter(|&v| v > 0);
+    let comp = match (min, max) {
+        (Some(lo), Some(hi)) => Comp::band(
+            usd,
+            lo.min(hi),
+            lo.max(hi),
+            CompInterval::Year,
+            CompSource::Api,
+        ),
+        (Some(v), None) | (None, Some(v)) => {
+            Comp::point(usd, v, CompInterval::Year, CompSource::Api)
+        }
+        (None, None) => return Ok(Comp::None),
+    };
+    comp.map_err(|e| AdapterError::drift("github.careers salary", e.to_string()))
+}
+
 fn infer_workplace(locations: &[String]) -> WorkplaceType {
     if locations
         .iter()
@@ -224,5 +262,28 @@ mod tests {
             GithubCareersAdapter::parse_page(broken, &board()).unwrap_err(),
             AdapterError::ParseDrift { .. }
         ));
+    }
+
+    #[test]
+    fn salary_is_harvested_when_present_and_zero_is_absent() {
+        use crate::model::{CompInterval, CompSource, Currency};
+        let n = |v: &str| serde_json::from_str::<serde_json::Number>(v).unwrap();
+        assert_eq!(
+            github_comp(Some(&n("150000")), Some(&n("200000"))).unwrap(),
+            Comp::band(
+                Currency::new("USD").unwrap(),
+                15_000_000,
+                20_000_000,
+                CompInterval::Year,
+                CompSource::Api
+            )
+            .unwrap()
+        );
+        // The board's current values are all 0 → not published → None, never a $0 band.
+        assert_eq!(
+            github_comp(Some(&n("0")), Some(&n("0"))).unwrap(),
+            Comp::None
+        );
+        assert_eq!(github_comp(None, None).unwrap(), Comp::None);
     }
 }
