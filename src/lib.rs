@@ -2,5 +2,6 @@
 //!
 //! See `SPEC.md` for the design, the change semantics and the per-platform quirk table.
 
+pub mod config;
 pub mod model;
 pub mod server;

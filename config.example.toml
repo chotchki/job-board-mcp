@@ -1,0 +1,24 @@
+# Example configuration. The real watch list is private by nature — copy this file,
+# edit it, and point `--config <path>` or the JOB_BOARD_MCP_CONFIG env var at your copy.
+#
+# The boards below are illustrative; verify each `token` against the board's own
+# careers page before relying on it.
+
+# Where the SQLite snapshot store lives. `~` expands at open time.
+db_path = "~/.local/share/job-board-mcp/store.sqlite"
+
+[[board]]
+id = "stripe"
+ats = "greenhouse"
+token = "stripe"
+comp_site_only = true          # bands publish on stripe.com, never in the greenhouse API
+
+[[board]]
+id = "openai"
+ats = "ashby"
+token = "openai"
+
+[[board]]
+id = "example-on-lever"
+ats = "lever"
+token = "example"
