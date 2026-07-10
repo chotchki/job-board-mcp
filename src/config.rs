@@ -123,7 +123,7 @@ mod tests {
         // failing the build.
         let cfg = Config::from_toml(include_str!("../config.example.toml")).unwrap();
         assert_eq!(cfg.db_path, "~/.local/share/job-board-mcp/store.sqlite");
-        assert_eq!(cfg.boards.len(), 6);
+        assert_eq!(cfg.boards.len(), 7);
         let stripe = &cfg.boards[0];
         assert_eq!(stripe.id, BoardId::new("stripe"));
         assert_eq!(stripe.ats, Ats::Greenhouse);

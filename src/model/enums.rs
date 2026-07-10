@@ -19,6 +19,7 @@ pub enum Ats {
     #[serde(rename = "smartrecruiters")]
     SmartRecruiters,
     Rippling,
+    GithubCareers,
 }
 
 /// Where the work happens. `Unknown` is the honest default for a board that doesn't

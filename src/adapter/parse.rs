@@ -26,6 +26,21 @@ pub(crate) fn epoch_millis(value: Option<i64>) -> Option<DateTime<Utc>> {
     value.and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
+/// Like [`rfc3339`], but also accepts a numeric offset written without a colon (`+0000`),
+/// which github.careers emits. Present-but-unparseable is drift; absent is `None`.
+pub(crate) fn datetime_lenient(
+    context: &str,
+    value: Option<&str>,
+) -> Result<Option<DateTime<Utc>>, AdapterError> {
+    match value {
+        None => Ok(None),
+        Some(s) => DateTime::parse_from_rfc3339(s)
+            .or_else(|_| DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%z"))
+            .map(|dt| Some(dt.with_timezone(&Utc)))
+            .map_err(|e| AdapterError::drift(context, format!("bad datetime {s:?}: {e}"))),
+    }
+}
+
 /// A bare calendar date `YYYY-MM-DD` (Workday's `startDate`), taken as midnight UTC.
 /// Present-but-unparseable is drift; absent is `None`.
 pub(crate) fn date(

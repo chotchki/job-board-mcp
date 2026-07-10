@@ -10,6 +10,7 @@ use crate::http::HttpClient;
 use crate::model::{Ats, BoardId, Posting, PostingDetail, ReqId};
 
 mod ashby;
+mod github_careers;
 mod greenhouse;
 mod lever;
 mod parse;
@@ -18,6 +19,7 @@ mod smartrecruiters;
 mod workday;
 
 pub use ashby::AshbyAdapter;
+pub use github_careers::GithubCareersAdapter;
 pub use greenhouse::GreenhouseAdapter;
 pub use lever::LeverAdapter;
 pub use rippling::RipplingAdapter;
@@ -81,6 +83,7 @@ pub async fn list_for(
         Ats::Workday => WorkdayAdapter.list(http, board).await,
         Ats::SmartRecruiters => SmartRecruitersAdapter.list(http, board).await,
         Ats::Rippling => RipplingAdapter.list(http, board).await,
+        Ats::GithubCareers => GithubCareersAdapter.list(http, board).await,
     }
 }
 
@@ -97,6 +100,7 @@ pub async fn detail_for(
         Ats::Workday => WorkdayAdapter.detail(http, board, req_id).await,
         Ats::SmartRecruiters => SmartRecruitersAdapter.detail(http, board, req_id).await,
         Ats::Rippling => RipplingAdapter.detail(http, board, req_id).await,
+        Ats::GithubCareers => GithubCareersAdapter.detail(http, board, req_id).await,
     }
 }
 

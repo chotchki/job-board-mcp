@@ -40,3 +40,9 @@ token = "Visa"           # the company identifier (case-sensitive)
 id = "rippling"
 ats = "rippling"
 token = "rippling"          # the board slug in ats.rippling.com/{slug}
+
+# github.careers is GitHub's own board; the token is ignored (there's one board).
+[[board]]
+id = "github"
+ats = "github_careers"
+token = "github"

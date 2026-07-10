@@ -1,0 +1,38 @@
+{
+  "jobs": [
+    {
+      "data": {
+        "slug": "5572",
+        "req_id": "5572",
+        "title": "Sr. Mgr, People Intelligence & Analytics",
+        "description": "<strong>About GitHub</strong><br><br>GitHub is the world\u2019s leading platform for agentic software development \u2014 powered b",
+        "location_name": "US Remote",
+        "full_location": "United States",
+        "location_type": "ANY",
+        "posted_date": "2026-07-09T23:54:00+0000",
+        "department": "",
+        "apply_url": "https://careers-githubinc.icims.com/jobs/5572/login",
+        "salary_min_value": 0,
+        "salary_max_value": 0
+      }
+    },
+    {
+      "data": {
+        "slug": "5565",
+        "req_id": "5565",
+        "title": "Senior Software Engineer",
+        "description": "<strong>About GitHub</strong><br><br>GitHub is the world\u2019s leading platform for agentic software development \u2014 powered b",
+        "location_name": "US Remote",
+        "full_location": "United States",
+        "location_type": "ANY",
+        "posted_date": "2026-07-08T19:51:00+0000",
+        "department": "",
+        "apply_url": "https://careers-githubinc.icims.com/jobs/5565/login",
+        "salary_min_value": 0,
+        "salary_max_value": 0
+      }
+    }
+  ],
+  "totalCount": 73,
+  "count": 73
+}
