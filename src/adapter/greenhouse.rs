@@ -14,7 +14,6 @@
 //!   literally says "remote", and `Unknown` otherwise — a narrow rule that never
 //!   asserts a workplace type the data doesn't support.
 
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use super::{Adapter, AdapterError};
@@ -112,8 +111,11 @@ impl GreenhouseAdapter {
             workplace_type,
             remote_scope: None,
             comp,
-            posted_at: parse_ts("greenhouse first_published", job.first_published.as_deref())?,
-            updated_at: parse_ts("greenhouse updated_at", job.updated_at.as_deref())?,
+            posted_at: super::parse::rfc3339(
+                "greenhouse first_published",
+                job.first_published.as_deref(),
+            )?,
+            updated_at: super::parse::rfc3339("greenhouse updated_at", job.updated_at.as_deref())?,
             updated_at_unreliable: board.updated_at_unreliable,
             department: job.departments.into_iter().next().map(|d| d.name),
             employment_type: None,
@@ -142,16 +144,6 @@ impl Adapter for GreenhouseAdapter {
             .get_text(&Self::detail_url(board.token.as_str(), req_id))
             .await?;
         Self::parse_detail(&body, board)
-    }
-}
-
-/// Present-but-unparseable is drift (the feed changed); absent is a legitimate `None`.
-fn parse_ts(context: &str, value: Option<&str>) -> Result<Option<DateTime<Utc>>, AdapterError> {
-    match value {
-        None => Ok(None),
-        Some(s) => DateTime::parse_from_rfc3339(s)
-            .map(|dt| Some(dt.with_timezone(&Utc)))
-            .map_err(|e| AdapterError::drift(context, format!("bad timestamp {s:?}: {e}"))),
     }
 }
 

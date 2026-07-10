@@ -16,15 +16,14 @@
 //! - **May 403 a bare client UA.** The shared HTTP layer sends a browser UA, so this
 //!   is handled upstream.
 
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use super::parse;
 use super::{Adapter, AdapterError};
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
 use crate::model::{
-    Comp, CompInterval, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType,
-    content_hash, decimal_to_minor,
+    Comp, CompSource, Currency, Posting, PostingDetail, ReqId, WorkplaceType, content_hash,
 };
 
 #[derive(Deserialize)]
@@ -139,7 +138,7 @@ impl AshbyAdapter {
             workplace_type,
             remote_scope: None,
             comp,
-            posted_at: parse_ts("ashby publishedAt", job.published_at.as_deref())?,
+            posted_at: parse::rfc3339("ashby publishedAt", job.published_at.as_deref())?,
             updated_at: None,
             updated_at_unreliable: board.updated_at_unreliable,
             department: job.department.clone(),
@@ -202,9 +201,9 @@ fn extract_comp(compensation: Option<&Compensation>) -> Result<Comp, AdapterErro
         None => return Ok(Comp::None),
     };
     let exp = currency.minor_unit_exponent();
-    let interval = parse_interval(salary.interval.as_deref())?;
+    let interval = parse::interval("ashby compensation.interval", salary.interval.as_deref())?;
 
-    let min = number_to_minor(
+    let min = parse::number_to_minor(
         "ashby compensation.minValue",
         salary.min_value.as_ref(),
         exp,
@@ -212,7 +211,7 @@ fn extract_comp(compensation: Option<&Compensation>) -> Result<Comp, AdapterErro
     let Some(min_minor) = min else {
         return Ok(Comp::None);
     };
-    let max_minor = number_to_minor(
+    let max_minor = parse::number_to_minor(
         "ashby compensation.maxValue",
         salary.max_value.as_ref(),
         exp,
@@ -227,54 +226,10 @@ fn extract_comp(compensation: Option<&Compensation>) -> Result<Comp, AdapterErro
     .map_err(|e| AdapterError::drift("ashby compensation", e.to_string()))
 }
 
-fn number_to_minor(
-    context: &str,
-    value: Option<&serde_json::Number>,
-    exp: u32,
-) -> Result<Option<i64>, AdapterError> {
-    match value {
-        None => Ok(None),
-        Some(n) => decimal_to_minor(&n.to_string(), exp)
-            .map(Some)
-            .ok_or_else(|| {
-                AdapterError::drift(context, format!("cannot represent {n} in minor units"))
-            }),
-    }
-}
-
-fn parse_interval(value: Option<&str>) -> Result<CompInterval, AdapterError> {
-    let raw = value.unwrap_or_default().to_uppercase();
-    if raw.contains("YEAR") {
-        Ok(CompInterval::Year)
-    } else if raw.contains("MONTH") {
-        Ok(CompInterval::Month)
-    } else if raw.contains("WEEK") {
-        Ok(CompInterval::Week)
-    } else if raw.contains("DAY") {
-        Ok(CompInterval::Day)
-    } else if raw.contains("HOUR") {
-        Ok(CompInterval::Hour)
-    } else {
-        Err(AdapterError::drift(
-            "ashby compensation.interval",
-            format!("unrecognized interval {value:?}"),
-        ))
-    }
-}
-
-fn parse_ts(context: &str, value: Option<&str>) -> Result<Option<DateTime<Utc>>, AdapterError> {
-    match value {
-        None => Ok(None),
-        Some(s) => DateTime::parse_from_rfc3339(s)
-            .map(|dt| Some(dt.with_timezone(&Utc)))
-            .map_err(|e| AdapterError::drift(context, format!("bad timestamp {s:?}: {e}"))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Ats, AtsToken, BoardId};
+    use crate::model::{Ats, AtsToken, BoardId, CompInterval};
 
     fn board() -> BoardConfig {
         BoardConfig {
@@ -341,14 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn interval_and_workplace_mapping() {
-        assert_eq!(parse_interval(Some("1 YEAR")).unwrap(), CompInterval::Year);
-        assert_eq!(
-            parse_interval(Some("1 MONTH")).unwrap(),
-            CompInterval::Month
-        );
-        assert!(parse_interval(Some("1 FORTNIGHT")).is_err());
+    fn workplace_mapping_reads_workplace_type_not_is_remote() {
         assert_eq!(map_workplace(Some("Hybrid")), WorkplaceType::Hybrid);
+        assert_eq!(map_workplace(Some("OnSite")), WorkplaceType::Onsite);
         assert_eq!(map_workplace(Some("something-new")), WorkplaceType::Unknown);
     }
 
