@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "claude-plan-bridge writeback --event create --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "TaskCreate"
+      },
+      {
+        "hooks": [
+          {
+            "command": "claude-plan-bridge writeback --event update --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "type": "command"
+          }
+        ],
+        "matcher": "TaskUpdate"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "claude-plan-bridge resume --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "claude-plan-bridge reconcile --cwd \"$CLAUDE_PROJECT_DIR\"",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

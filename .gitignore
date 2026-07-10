@@ -1,0 +1,7 @@
+/target
+.claude/plan-bridge-state.json
+.claude/plan-bridge-state.json.lock
+.claude/plan-bridge-debug.jsonl
+
+# the real board list is private by nature; only config.example.toml ships
+/config.toml
