@@ -5,29 +5,51 @@ on:
     branches: [main]
   pull_request:
 
+# One in-flight run per ref; a newer push cancels the stale run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  # RUSTFLAGS=-D warnings is deliberately NOT global. Lint-level flags don't thrash
+  # cargo's build cache (only codegen flags like --cfg do), but a global RUSTFLAGS is
+  # folded into the Swatinem/rust-cache key, coupling cache identity to a lint choice
+  # for nothing. -D warnings is scoped to the clippy step instead.
 
 jobs:
-  check:
-    name: fmt + clippy + test
+  lint:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
       - uses: Swatinem/rust-cache@v2
-
       - name: fmt
         run: cargo fmt --all --check
-
+      # --all-targets is load-bearing: a plain `cargo clippy` skips tests and benches,
+      # so the [lints] table and clippy.toml bans would not guard them.
       - name: clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      # A platform-specific break — the Windows path-escape trap in JSON fixtures is
+      # the one we expect — must not be masked by another OS failing first.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # rust-cache has crashed the windows-latest runner mid-restore. Skip it there:
+      # ~30s slower Windows builds, but a flaky cache defeats the reason we added the runner.
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.os != 'windows-latest'
       # Live board smoke tests are #[ignore]d, so CI never touches the network.
       - name: test
         run: cargo test --all-features

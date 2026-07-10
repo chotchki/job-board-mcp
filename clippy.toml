@@ -1,0 +1,23 @@
+# MUST sit at the crate root next to Cargo.toml, or clippy silently ignores it —
+# no error, no warning. Enforced by `cargo clippy --all-targets -- -D warnings`;
+# --all-targets is load-bearing, because a plain `cargo clippy` skips tests and
+# benches and a banned call in a test would escape.
+#
+# The determinism seam: wall-clock time is injected as a parameter, never read
+# ambiently, so snapshots and diffs are reproducible. The one legitimate reader
+# suppresses with #[expect(clippy::disallowed_methods, reason = "...")], which
+# also proves the ban still fires — an #[expect] that stops suppressing is itself
+# an error.
+
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "record time via an injected taken_at param; the MCP handler is the only clock reader" },
+
+    # DORMANT pre-bans — do NOT uncomment until the dep is a direct dependency.
+    # Clippy silently ignores a path it cannot resolve: no error, exit 0, even under
+    # -D warnings. So an inactive ban is indistinguishable from a typo'd one — green
+    # forever. Enable each in the same diff that adds its dependency, together with a
+    # call site that proves it fires.
+    # { path = "chrono::Utc::now",   reason = "non-deterministic; inject the clock" },
+    # { path = "chrono::Local::now", reason = "non-deterministic; inject the clock" },
+    # { path = "rand::random",       reason = "non-deterministic; thread a seeded Rng" },
+]

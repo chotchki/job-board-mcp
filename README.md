@@ -8,6 +8,12 @@ Design, the change semantics, and the per-platform quirk table live in [SPEC.md]
 
 **Status:** pre-v0.1, under construction. Nothing here is stable yet.
 
+## Development
+
+Enable the local pre-push gate (fmt + clippy + test, mirroring CI) once per clone:
+
+    git config core.hooksPath .githooks
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.

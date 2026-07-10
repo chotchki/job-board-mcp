@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Run the checks CI runs, locally, before anything leaves the machine. Mirrors
+# .github/workflows/ci.yml minus the tri-OS matrix — you only have the one OS.
+# Emergency bypass: git push --no-verify
+set -euo pipefail
+
+echo "pre-push [1/3] cargo fmt --all --check"
+cargo fmt --all --check
+
+echo "pre-push [2/3] cargo clippy --all-targets --all-features -- -D warnings"
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo "pre-push [3/3] cargo test --all-features"
+cargo test --all-features
+
+echo "pre-push OK"

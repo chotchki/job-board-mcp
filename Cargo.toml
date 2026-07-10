@@ -24,6 +24,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 [lints.rust]
 unsafe_code = "forbid"
 
+[lints.clippy]
+# Suppressions carry a WHY, and #[expect] beats #[allow] because it rots loudly
+# (unfulfilled_lint_expectations) instead of silently.
+# `reason = "..."` is NOT accepted inside this table — cargo warns "unused manifest
+# key" and drops it. Reasons live in the source #[expect(..., reason = "...")].
+allow_attributes_without_reason = "deny"
+allow_attributes = "warn"
+
 [dev-dependencies]
 rmcp = { version = "2.2.0", features = ["client", "transport-child-process"] }
 tokio = { version = "1", features = ["full"] }
