@@ -10,12 +10,6 @@ claude-plan-bridge is wired, drive this file through TaskCreate/TaskUpdate
 Completed phases sweep to PLAN_ARCHIVE.md.
 -->
 
-## Phase E - MCP surface + v0.1
-- [x] E.1 - expose tools: list_boards, fetch_board, fetch_posting, diff_boards, mark_obit, list_obits
-- [x] E.2 - end-to-end test driving the stdio server from an MCP client harness
-- [ ] E.3 - README: install, config schema, tool reference, the quirk table (lifted from SPEC)
-- [ ] E.4 - tag v0.1.0
-
 ## Phase F - Adapters wave 2 (post-v0.1)
 - [ ] F.1 - workday (CXS POST search; startDate = post date; maintenance mode → BoardUnreachable, never an empty board)
 - [ ] F.2 - workable + smartrecruiters

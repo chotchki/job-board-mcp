@@ -44,3 +44,15 @@
 - [x] D.5 - diff semantics suite from HAND-DERIVED vectors, authored from SPEC prose and run through the real diff_boards (never golden-captured from current output, which freezes today's bugs): bulk-touch updated_at → zero CHANGED, empty-fetch guard, obit suppression, in-place down-level → CHANGED; a field-materiality law (mutate each field, hash changes iff the field is material); a semantic-lock snapshot of the diff CLASSIFICATION (which req_ids are NEW/CHANGED/DEAD plus changed-field lists) at a pinned fixture pair
 
 
+---
+
+## 2026-07-10
+
+## Phase E - MCP surface + v0.1
+- [x] E.1 - expose tools: list_boards, fetch_board, fetch_posting, diff_boards, mark_obit, list_obits
+- [x] E.2 - end-to-end test driving the stdio server from an MCP client harness
+- [x] E.3 - README: install, config schema, tool reference, the quirk table (lifted from SPEC)
+- [x] E.4 - tag v0.1.0
+
+- [x] E.5 - User docs: dogfooding guide + cargo install
+
