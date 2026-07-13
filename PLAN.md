@@ -10,10 +10,10 @@ claude-plan-bridge is wired, drive this file through TaskCreate/TaskUpdate
 Completed phases sweep to PLAN_ARCHIVE.md.
 -->
 ## Phase G - Failure-mode census
-- [ ] G.1 - Determine rmcp handler-panic behavior empirically
-- [ ] G.2 - Census hot-path panic sites on untrusted data
-- [ ] G.3 - Census emitted schema constructs for client-rejection risk
-- [ ] G.4 - Census error legibility end-to-end
+- [x] G.1 - Determine rmcp handler-panic behavior empirically
+- [x] G.2 - Census hot-path panic sites on untrusted data
+- [x] G.3 - Census emitted schema constructs for client-rejection risk
+- [x] G.4 - Census error legibility end-to-end
 ## Phase H - Contain catastrophic failures
 - [ ] H.1 - Replace read-path expects on persisted JSON with typed errors
 - [ ] H.2 - Add a handler panic boundary if needed
@@ -22,6 +22,7 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 - [ ] I.1 - Add schema-conformance e2e against a real validator
 - [ ] I.2 - Spike structured (typed data) errors on McpError
 - [ ] I.3 - Document the failure-mode contract
+- [ ] I.4 - Inline enum schemas — drop $ref/$defs from the emitted contract
 
 ## Backlog (not yet phased)
 
