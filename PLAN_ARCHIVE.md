@@ -98,3 +98,24 @@ added 2026-07-10.
 - [x] I.6 - I.6 - Workable empty description → None (empty-component join)
 - [x] I.7 - I.7 - Docs + version bump 0.5.0 + install + release
 
+---
+
+## 2026-07-13
+
+## Phase G - Failure-mode census
+- [x] G.1 - Determine rmcp handler-panic behavior empirically
+- [x] G.2 - Census hot-path panic sites on untrusted data
+- [x] G.3 - Census emitted schema constructs for client-rejection risk
+- [x] G.4 - Census error legibility end-to-end
+
+## Phase H - Contain catastrophic failures
+- [x] H.1 - Replace read-path expects on persisted JSON with typed errors
+- [x] H.2 - Add a handler panic boundary if needed
+- [x] H.3 - Harden JSON access across all 8 adapters
+
+## Phase I - Contract & legibility guardrails
+- [x] I.1 - Add schema-conformance e2e against a real validator
+- [x] I.2 - Spike structured (typed data) errors on McpError
+- [x] I.3 - Document the failure-mode contract
+- [x] I.4 - Inline enum schemas — drop $ref/$defs from the emitted contract
+
