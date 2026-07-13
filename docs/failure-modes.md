@@ -1,10 +1,45 @@
 # Failure modes — job-board-mcp
 
-Working census (phase G) that phase I.3 graduates into a failure-mode contract. Each
-entry: what fails, the blast radius, what the CALLER sees, and where the fix lands.
+The thesis behind the whole sweep: today's two loud bugs were both "one bad input → total,
+illegible failure." Find the latent versions before they're loud. The **contract** below is
+what the sweep bought; the **census** (phase G) and **remediations** (phases H/I) beneath it
+are the evidence. Each census entry: what fails, the blast radius, what the CALLER sees, where
+the fix lands.
 
-The thesis behind the whole sweep: today's two loud bugs were both "one bad input →
-total, illegible failure." Find the latent versions before they're loud.
+---
+
+## The failure-mode contract
+
+What this server now guarantees a caller, and what an error means:
+
+1. **No total-listing failure from a schema construct.** Every emitted tool schema is
+   client-safe — no boolean subschemas, no `$ref`/`$defs` — enforced by the
+   `tool_schemas_are_client_safe` e2e test. (Closes the class of both the boolean-schema bug
+   and the `mark_obit` `$ref`.)
+
+2. **No silent hang.** Every failure returns a response. Known panic sources (persisted-JSON
+   reads) are typed errors; any unforeseen panic is caught and returned as `internal_error`.
+   No caller request can black-hole.
+
+3. **No garbage postings.** A required field (`req_id`, `title`, `url`) missing from an ATS
+   payload is a hard `ParseDrift`, never a silently-defaulted empty — the store never holds a
+   posting you can't apply to.
+
+4. **Every error is legible AND machine-branchable.** The message is source-chained (store
+   errors carry the sqlx cause); the JSON-RPC-error channel also carries
+   `data: {"kind", "retryable"}`:
+
+   | kind               | JSON-RPC        | retryable | means                                            |
+   |--------------------|-----------------|-----------|--------------------------------------------------|
+   | `bad_input`        | invalid_params  | false     | wrong board / req id / arg — fix the input        |
+   | `transient_remote` | internal_error  | **true**  | the ATS was unreachable / timed out — retry later |
+   | `broken_adapter`   | internal_error  | false     | the feed's shape drifted — the adapter needs a fix|
+   | `store`            | internal_error  | false     | persistence failure, incl. a corrupt row          |
+   | `internal`         | internal_error  | false     | a caught panic or an io error                     |
+
+   Caveat: `data` rides only the JSON-RPC-error channel (arg-deserialize errors are tool
+   `isError` text, no `data`) and its surfacing to the agent is client-dependent — the message
+   is the portable signal, `data` the upside where clients honor it.
 
 ---
 
@@ -244,3 +279,17 @@ This is a client-COMPAT conformance check, not JSON-Schema meta-validation: both
 constructs are valid schema — the point is what a real MCP client's validator REJECTS. A
 meta-schema validator (the `jsonschema` crate) would pass all of them and miss the actual risk,
 so it's deliberately not used.
+
+### I.2 — typed error `data` payload — DONE (adopted)
+
+The spike found `ErrorData` has a `data: Option<Value>` we were passing `None`. Adopted: an
+`ErrorKind` taxonomy (`bad_input` | `transient_remote` | `broken_adapter` | `store` |
+`internal`) mirrored into `data` as `{"kind","retryable"}` on every `McpError`. Only
+`transient_remote` is `retryable: true`. Wire-verified: unknown board returns
+`{"code":-32602,"message":"unknown board: nope","data":{"kind":"bad_input","retryable":false}}`.
+
+Caveats (from the spike, unchanged by adopting): `data` rides only the JSON-RPC-error channel —
+arg-deserialize errors come back as tool `isError` text with no `data` — and whether a client
+surfaces `error.data` to the agent is client-dependent. So the source-chained MESSAGE stays the
+portable, always-visible signal; `data` is the machine-branchable upside where clients honor it.
+Tests: `error_kind_data_encodes_kind_and_retryable`, `adapter_err_tags_*`.

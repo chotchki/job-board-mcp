@@ -225,7 +225,12 @@ impl JobBoardServer {
         self.inner
             .boards
             .get(&BoardId::new(id))
-            .ok_or_else(|| McpError::invalid_params(format!("unknown board: {id}"), None))
+            .ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("unknown board: {id}"),
+                    ErrorKind::BadInput.data(),
+                )
+            })
     }
 
     #[tool(
@@ -443,7 +448,10 @@ impl JobBoardServer {
             None => self.inner.db_dir.join("captures"),
         };
         std::fs::create_dir_all(&out_dir).map_err(|e| {
-            McpError::internal_error(format!("creating {}: {e}", out_dir.display()), None)
+            McpError::internal_error(
+                format!("creating {}: {e}", out_dir.display()),
+                ErrorKind::Internal.data(),
+            )
         })?;
 
         let records = self
@@ -464,7 +472,10 @@ impl JobBoardServer {
             );
             let path = out_dir.join(&filename);
             std::fs::write(&path, &rec.body).map_err(|e| {
-                McpError::internal_error(format!("writing {}: {e}", path.display()), None)
+                McpError::internal_error(
+                    format!("writing {}: {e}", path.display()),
+                    ErrorKind::Internal.data(),
+                )
             })?;
             dumped.push(json!({
                 "path": path.to_string_lossy(),
@@ -514,12 +525,56 @@ fn to_value<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("model types serialize")
 }
 
+/// The machine-branchable class of a failure, mirrored into `McpError.data` as
+/// `{"kind", "retryable"}` so a calling agent can branch on the kind instead of matching
+/// prose. Visible only on the JSON-RPC-error channel — arg-deserialize errors come back as
+/// tool `isError` text with no `data` (docs/failure-modes.md I.2).
+#[derive(Clone, Copy)]
+enum ErrorKind {
+    /// The caller passed something wrong (bad board, bad req id). Fix the input, then retry.
+    BadInput,
+    /// The ATS was unreachable or timed out. Not the caller's fault; retry later.
+    TransientRemote,
+    /// The feed's shape drifted out from under the parser — the adapter needs a fix, so a
+    /// bare retry won't help.
+    BrokenAdapter,
+    /// A persistence failure — open/migrate/write, or a corrupt row.
+    Store,
+    /// An unexpected internal failure: a caught panic, an io error.
+    Internal,
+}
+
+impl ErrorKind {
+    fn slug(self) -> &'static str {
+        match self {
+            ErrorKind::BadInput => "bad_input",
+            ErrorKind::TransientRemote => "transient_remote",
+            ErrorKind::BrokenAdapter => "broken_adapter",
+            ErrorKind::Store => "store",
+            ErrorKind::Internal => "internal",
+        }
+    }
+
+    /// Only a transient remote failure is worth an unchanged retry.
+    fn retryable(self) -> bool {
+        matches!(self, ErrorKind::TransientRemote)
+    }
+
+    /// The `data` payload to hang on an `McpError` of this kind.
+    fn data(self) -> Option<Value> {
+        Some(json!({ "kind": self.slug(), "retryable": self.retryable() }))
+    }
+}
+
 fn store_err(e: StoreError) -> McpError {
     // StoreError's Display is a terse category ("writing the store") and thiserror doesn't
     // fold a `#[source]` into it — so `{e}` alone drops the sqlx cause underneath, which is
     // the part that says WHAT broke (db locked, constraint, disk full) and whether the
     // caller should retry. Walk the chain so that detail survives the MCP boundary.
-    McpError::internal_error(format!("store error: {}", error_chain(&e)), None)
+    McpError::internal_error(
+        format!("store error: {}", error_chain(&e)),
+        ErrorKind::Store.data(),
+    )
 }
 
 /// Flatten an error and its `#[source]` chain into one `top: cause: root-cause` line.
@@ -537,13 +592,21 @@ fn error_chain(e: &dyn std::error::Error) -> String {
 }
 
 fn adapter_err(e: AdapterError) -> McpError {
-    match e {
-        // Bad user input (wrong board or wrong req) is invalid_params, not internal_error —
-        // it points the caller at what they passed, not at the server.
-        AdapterError::UnknownBoard(_) | AdapterError::PostingNotFound(_) => {
-            McpError::invalid_params(e.to_string(), None)
+    let kind = match &e {
+        // Bad user input (wrong board or wrong req) — points the caller at what they passed.
+        AdapterError::UnknownBoard(_) | AdapterError::PostingNotFound(_) => ErrorKind::BadInput,
+        // Unreachable board or a network failure — retry later, not the caller's fault.
+        AdapterError::BoardUnreachable { .. } | AdapterError::Transport(_) => {
+            ErrorKind::TransientRemote
         }
-        other => McpError::internal_error(other.to_string(), None),
+        // The feed's shape drifted — the adapter needs a fix.
+        AdapterError::ParseDrift { .. } => ErrorKind::BrokenAdapter,
+    };
+    // BadInput is invalid_params (points at what the caller passed); everything else is a
+    // server/remote fault → internal_error.
+    match kind {
+        ErrorKind::BadInput => McpError::invalid_params(e.to_string(), kind.data()),
+        _ => McpError::internal_error(e.to_string(), kind.data()),
     }
 }
 
@@ -564,7 +627,7 @@ where
         Ok(result) => result,
         Err(payload) => Err(McpError::internal_error(
             format!("tool handler panicked: {}", panic_message(payload.as_ref())),
-            None,
+            ErrorKind::Internal.data(),
         )),
     }
 }
@@ -674,5 +737,41 @@ mod tests {
     async fn catch_handler_panic_passes_a_normal_result_through() {
         let out = catch_handler_panic(async { Ok(CallToolResult::default()) }).await;
         assert!(out.is_ok());
+    }
+
+    #[test]
+    fn error_kind_data_encodes_kind_and_retryable() {
+        use super::ErrorKind;
+        assert_eq!(
+            ErrorKind::TransientRemote.data().unwrap(),
+            serde_json::json!({ "kind": "transient_remote", "retryable": true })
+        );
+        assert_eq!(
+            ErrorKind::BadInput.data().unwrap(),
+            serde_json::json!({ "kind": "bad_input", "retryable": false })
+        );
+    }
+
+    #[test]
+    fn adapter_err_tags_a_transient_remote_failure_retryable() {
+        use crate::adapter::AdapterError;
+        let err = super::adapter_err(AdapterError::BoardUnreachable { status: 503 });
+        assert_eq!(
+            err.data.unwrap(),
+            serde_json::json!({ "kind": "transient_remote", "retryable": true })
+        );
+    }
+
+    #[test]
+    fn adapter_err_tags_parse_drift_as_broken_adapter_not_retryable() {
+        use crate::adapter::AdapterError;
+        let err = super::adapter_err(AdapterError::ParseDrift {
+            context: "workday jobs".into(),
+            detail: "missing field".into(),
+        });
+        assert_eq!(
+            err.data.unwrap(),
+            serde_json::json!({ "kind": "broken_adapter", "retryable": false })
+        );
     }
 }
