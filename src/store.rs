@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::config::BoardConfig;
-use crate::model::{Ats, BoardId, ObitKind, Posting, ReqId};
+use crate::model::{Ats, BoardId, Comp, ObitKind, Posting, ReqId, WorkplaceType};
 
 /// Things that go wrong opening, migrating, or writing the store.
 #[derive(Debug, thiserror::Error)]
@@ -103,6 +103,19 @@ pub struct CaptureMeta {
     pub captured_at: String,
     /// Body length in bytes — the size of the sample without carrying the sample itself.
     pub bytes: i64,
+}
+
+/// The last-known summary of a posting, keyed off its stored snapshot — what
+/// `diff_boards --include_summary` hangs on NEW/CHANGED rows so triage reads a title, a
+/// place and a comp band instead of a bare req id. No description (that lives only in a live
+/// detail fetch) and no dates: just the fields a "should I look closer" call needs.
+#[derive(Debug, Serialize)]
+pub struct PostingSummary {
+    pub title: String,
+    pub url: String,
+    pub locations: Vec<String>,
+    pub workplace_type: WorkplaceType,
+    pub comp: Comp,
 }
 
 /// A capture ledger row WITH its body — what `dump_captures` reads to write sample files.
@@ -493,6 +506,42 @@ impl Store {
         Ok(BoardDiff { new, changed, dead })
     }
 
+    /// The last-known [`PostingSummary`] for every current posting on a board, keyed by
+    /// req_id. Fed to `diff_boards --include_summary` to enrich NEW/CHANGED rows straight
+    /// from the stored snapshot — no refetch. Reads all of the board's postings (bounded and
+    /// local) and lets the caller pick the ids it cares about.
+    pub async fn board_posting_summaries(
+        &self,
+        board_id: &BoardId,
+    ) -> Result<HashMap<ReqId, PostingSummary>, StoreError> {
+        let board = board_id.as_str();
+        let rows = sqlx::query!(
+            "SELECT req_id, title, url, locations, workplace_type, comp
+             FROM postings WHERE board_id = ?1",
+            board,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        rows.into_iter()
+            .map(|r| {
+                Ok((
+                    ReqId::new(r.req_id),
+                    PostingSummary {
+                        title: r.title,
+                        url: r.url,
+                        locations: serde_json::from_str(&r.locations)
+                            .map_err(|e| StoreError::corrupt("posting locations", e))?,
+                        workplace_type: serde_json::from_str(&r.workplace_type)
+                            .map_err(|e| StoreError::corrupt("posting workplace_type", e))?,
+                        comp: serde_json::from_str(&r.comp)
+                            .map_err(|e| StoreError::corrupt("posting comp", e))?,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     /// Mark a posting (by req_id) or a freeform key dead, rejected, out-of-scope or a
     /// ghost, so it stops surfacing as NEW. Re-marking the same key updates it. `marked_at`
     /// is injected, like every other timestamp — the store reads no clock.
@@ -766,6 +815,29 @@ mod tests {
             ),
             "expected Corrupt {{ obit kind }}, got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn board_posting_summaries_returns_last_known_fields_by_req() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.upsert_board(&board()).await.unwrap();
+        let id = BoardId::new("gitlab");
+        store
+            .record_snapshot(
+                &id,
+                day(0),
+                &[posting("1", "Engineer"), posting("2", "Designer")],
+            )
+            .await
+            .unwrap();
+
+        let summaries = store.board_posting_summaries(&id).await.unwrap();
+        assert_eq!(summaries.len(), 2);
+        let one = &summaries[&ReqId::new("1")];
+        assert_eq!(one.title, "Engineer");
+        assert_eq!(one.locations, vec!["Remote".to_owned()]);
+        assert_eq!(one.workplace_type, WorkplaceType::Remote);
+        assert!(matches!(one.comp, Comp::None));
     }
 
     #[tokio::test]

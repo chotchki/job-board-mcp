@@ -23,7 +23,7 @@ use crate::clock;
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
 use crate::model::{Ats, BoardId, ObitKind, ReqId};
-use crate::store::{Store, StoreError};
+use crate::store::{BoardDiff, PostingSummary, Store, StoreError};
 
 struct Inner {
     store: Arc<Store>,
@@ -65,6 +65,12 @@ pub struct DiffBoardsArgs {
     /// Boards to diff; omit to diff every configured board.
     #[serde(default)]
     pub board_ids: Option<Vec<String>>,
+    /// Enrich NEW and CHANGED rows with each posting's last-known title, locations, comp and
+    /// workplace from the stored snapshot — no refetch. Default false: the bare-id diff is
+    /// smaller, and the summary only earns its keys when you're triaging what changed. DEAD
+    /// rows stay id-only (use `fetch_posting` for a dead req's post-mortem).
+    #[serde(default)]
+    pub include_summary: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -346,6 +352,17 @@ impl JobBoardServer {
                 .diff_board(&board.id)
                 .await
                 .map_err(store_err)?;
+            let diff = if args.include_summary {
+                let summaries = self
+                    .inner
+                    .store
+                    .board_posting_summaries(&board.id)
+                    .await
+                    .map_err(store_err)?;
+                enrich_diff(&diff, &summaries)
+            } else {
+                to_value(&diff)
+            };
             diffs.push(json!({ "board_id": board.id, "diff": diff }));
         }
         diffs.sort_by(|a, b| a["board_id"].as_str().cmp(&b["board_id"].as_str()));
@@ -517,6 +534,34 @@ fn expand_tilde(path: &str) -> PathBuf {
 
 fn to_value<T: Serialize>(value: T) -> Value {
     serde_json::to_value(value).expect("model types serialize")
+}
+
+/// Build the `--include_summary` diff body: NEW and CHANGED rows carry each posting's
+/// last-known summary (title, url, locations, workplace, comp) pulled from `summaries`; DEAD
+/// stays req-id-only — a dead posting has nothing current to summarize (its post-mortem is
+/// `fetch_posting`'s job). Row keys are `req_id`, then `changed_fields` for CHANGED, then the
+/// summary fields flattened in.
+fn enrich_diff(diff: &BoardDiff, summaries: &HashMap<ReqId, PostingSummary>) -> Value {
+    let row = |req: &ReqId, changed: Option<&[String]>| {
+        let mut obj = serde_json::Map::new();
+        obj.insert("req_id".into(), to_value(req));
+        if let Some(fields) = changed {
+            obj.insert("changed_fields".into(), to_value(fields));
+        }
+        if let Some(Value::Object(fields)) = summaries.get(req).map(to_value) {
+            obj.extend(fields);
+        }
+        Value::Object(obj)
+    };
+    json!({
+        "new": diff.new.iter().map(|r| row(r, None)).collect::<Vec<_>>(),
+        "changed": diff
+            .changed
+            .iter()
+            .map(|c| row(&c.req_id, Some(c.changed_fields.as_slice())))
+            .collect::<Vec<_>>(),
+        "dead": to_value(&diff.dead),
+    })
 }
 
 /// The machine-branchable class of a failure, mirrored into `McpError.data` as
@@ -771,5 +816,45 @@ mod tests {
             err.data.unwrap(),
             serde_json::json!({ "kind": "broken_adapter", "retryable": false })
         );
+    }
+
+    #[test]
+    fn enrich_diff_flattens_summary_into_new_and_changed_but_not_dead() {
+        use super::{BoardDiff, PostingSummary, enrich_diff};
+        use crate::model::{Comp, ReqId, WorkplaceType};
+        use crate::store::ChangedPosting;
+
+        let mut summaries = std::collections::HashMap::new();
+        summaries.insert(
+            ReqId::new("n1"),
+            PostingSummary {
+                title: "Staff Engineer".into(),
+                url: "https://x/n1".into(),
+                locations: vec!["Remote".into()],
+                workplace_type: WorkplaceType::Remote,
+                comp: Comp::None,
+            },
+        );
+        // c1 has NO summary entry — it must fall back to bare req_id + changed_fields.
+        let diff = BoardDiff {
+            new: vec![ReqId::new("n1")],
+            changed: vec![ChangedPosting {
+                req_id: ReqId::new("c1"),
+                changed_fields: vec!["title".into()],
+            }],
+            dead: vec![ReqId::new("d1")],
+        };
+
+        let out = enrich_diff(&diff, &summaries);
+        // NEW carries the summary, flattened.
+        assert_eq!(out["new"][0]["req_id"], "n1");
+        assert_eq!(out["new"][0]["title"], "Staff Engineer");
+        assert_eq!(out["new"][0]["locations"][0], "Remote");
+        // CHANGED keeps changed_fields; with no summary it stays just req_id + changed_fields.
+        assert_eq!(out["changed"][0]["req_id"], "c1");
+        assert_eq!(out["changed"][0]["changed_fields"][0], "title");
+        assert!(out["changed"][0].get("title").is_none());
+        // DEAD stays a bare id array — nothing current to summarize.
+        assert_eq!(out["dead"][0], "d1");
     }
 }

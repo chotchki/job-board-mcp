@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use chrono::DateTime;
 use job_board_mcp::config::{BoardConfig, Config};
-use job_board_mcp::model::{Ats, AtsToken, BoardId};
+use job_board_mcp::model::{
+    Ats, AtsToken, BoardId, Comp, Equity, Posting, ReqId, WorkplaceType, content_hash,
+};
 use job_board_mcp::store::{RawCapture, Store};
 use rmcp::{
     ServiceExt,
@@ -253,6 +255,82 @@ async fn dump_captures_writes_a_sample_file_to_the_chosen_dir() -> anyhow::Resul
     assert_eq!(std::fs::read_to_string(path)?, r#"{"jobs":[{"id":1}]}"#);
     // The body is on disk, never echoed inline — the whole point of dumping to files.
     assert!(dumped["dumped"][0].get("body").is_none());
+
+    client.cancel().await?;
+    Ok(())
+}
+
+fn seed_posting(req: &str, title: &str) -> Posting {
+    let comp = Comp::None;
+    Posting {
+        ats: Ats::Greenhouse,
+        board_id: BoardId::new("testco"),
+        req_id: ReqId::new(req),
+        title: title.to_owned(),
+        url: format!("https://boards.greenhouse.io/testco/jobs/{req}"),
+        locations: vec!["Remote".to_owned()],
+        workplace_type: WorkplaceType::Remote,
+        remote_scope: None,
+        comp: comp.clone(),
+        equity: Equity::None,
+        posted_at: None,
+        updated_at: None,
+        updated_at_unreliable: false,
+        department: None,
+        employment_type: None,
+        content_hash: content_hash(
+            title,
+            &["Remote".to_owned()],
+            WorkplaceType::Remote,
+            &comp,
+            Equity::None,
+            "",
+        ),
+    }
+}
+
+/// Seed a snapshot straight into the store (so a NEW row exists without a live fetch), then
+/// call `diff_boards --include_summary` through the server and assert the NEW row is enriched.
+#[tokio::test]
+async fn diff_boards_include_summary_enriches_new_rows() -> anyhow::Result<()> {
+    let fixture = Fixture::new("summary");
+    // Seed then DROP the store handle before the server opens the same SQLite file.
+    {
+        let store = Store::open(&fixture.dir.join("store.sqlite")).await?;
+        let board = BoardConfig {
+            id: BoardId::new("testco"),
+            ats: Ats::Greenhouse,
+            token: AtsToken::new("testco"),
+            site: None,
+            comp_site_only: false,
+            updated_at_unreliable: false,
+        };
+        store.upsert_board(&board).await?;
+        store
+            .record_snapshot(
+                &BoardId::new("testco"),
+                job_board_mcp::clock::now(),
+                &[seed_posting("R1", "Staff Engineer")],
+            )
+            .await?;
+    }
+
+    let client = connect(&fixture).await?;
+    let out = client
+        .call_tool(
+            CallToolRequestParams::new("diff_boards").with_arguments(
+                serde_json::json!({ "include_summary": true })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await?;
+    let body = out.structured_content.expect("structured content");
+    let new0 = &body["diffs"][0]["diff"]["new"][0];
+    assert_eq!(new0["req_id"], serde_json::json!("R1"));
+    assert_eq!(new0["title"], serde_json::json!("Staff Engineer"));
+    assert_eq!(new0["locations"][0], serde_json::json!("Remote"));
 
     client.cancel().await?;
     Ok(())
