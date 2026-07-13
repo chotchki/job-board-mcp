@@ -223,3 +223,24 @@ stub (no title/path), never a real posting.
 The silent-failure surface is closed. Panics (read-path + unforeseen) are legible errors, and
 the one adapter gap that let a garbage posting through is a hard drift. Only I.4 (inline the
 `mark_obit` enum) remains as a concrete fragility fix; the rest of I is regression guards.
+
+### I.4 — inline the `ObitKind` enum — DONE
+
+`#[schemars(inline)]` on `ObitKind` (its `inline_schema()` → true). `mark_obit.kind` now renders
+`{"enum":["dead","rejected","out_of_scope","ghost"],"type":"string"}` inline — no `$ref`, no
+`$defs`. Live probe confirms ZERO tools carry `$ref`/`$defs` anywhere. The doc comment survives
+as the schema `description`.
+
+### I.1 — schema client-safety conformance test — DONE
+
+Broadened the e2e schema walker (was boolean-subschemas only) into `assert_client_safe_schema`,
+run over every tool's input + output schema in `tool_schemas_are_client_safe`. It now bans BOTH
+failure classes this server has hit: boolean subschemas in `properties`/`items` AND
+`$ref`/`$defs`/`definitions` anywhere. Negative control verified: removing `#[schemars(inline)]`
+makes it fail with `client-unsafe $defs at mark_obit/inputSchema/$defs`. A future enum/struct
+added to a tool without inlining now fails CI instead of shipping a listing-killer.
+
+This is a client-COMPAT conformance check, not JSON-Schema meta-validation: both banned
+constructs are valid schema — the point is what a real MCP client's validator REJECTS. A
+meta-schema validator (the `jsonschema` crate) would pass all of them and miss the actual risk,
+so it's deliberately not used.

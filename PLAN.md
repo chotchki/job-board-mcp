@@ -19,10 +19,10 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 - [x] H.2 - Add a handler panic boundary if needed
 - [x] H.3 - Harden JSON access across all 8 adapters
 ## Phase I - Contract & legibility guardrails
-- [ ] I.1 - Add schema-conformance e2e against a real validator
+- [x] I.1 - Add schema-conformance e2e against a real validator
 - [ ] I.2 - Spike structured (typed data) errors on McpError
 - [ ] I.3 - Document the failure-mode contract
-- [ ] I.4 - Inline enum schemas — drop $ref/$defs from the emitted contract
+- [x] I.4 - Inline enum schemas — drop $ref/$defs from the emitted contract
 
 ## Backlog (not yet phased)
 

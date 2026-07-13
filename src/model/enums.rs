@@ -40,6 +40,11 @@ pub enum WorkplaceType {
 /// a scan endlessly without a ledger to remember it's a phantom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+// Inline the enum into any schema that references it, rather than emitting a `$ref` into a
+// `$defs` block. A `$ref` is spec-legal but a weak MCP client validator may not resolve it,
+// and one rejected tool sinks the whole listing (docs/failure-modes.md G.3) — same class as
+// the boolean-subschema bug. mark_obit is the only tool carrying this enum.
+#[schemars(inline)]
 pub enum ObitKind {
     Dead,
     Rejected,

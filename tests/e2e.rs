@@ -104,17 +104,31 @@ async fn server_advertises_its_identity_and_the_full_tool_surface() -> anyhow::R
     Ok(())
 }
 
-/// Asserts every position that must hold a schema holds an OBJECT, never a bare
-/// boolean. schemars derives `serde_json::Value` as the boolean schema `true` —
-/// spec-legal, but Claude Code's tools/list validator rejects it as a `properties`
-/// value, and one bad tool fails the entire listing (found live: fetch_posting's
-/// `posting: Value` kept every tool from loading). `additionalProperties` stays
-/// exempt — boolean is the conventional strictness switch there and clients take it.
-fn assert_no_boolean_subschemas(path: &str, node: &serde_json::Value) {
+/// Asserts every emitted tool schema stays inside the subset a strict-but-incomplete MCP
+/// client validator accepts — the failure class that has bitten this server twice, where a
+/// spec-legal construct one validator dislikes fails the ENTIRE `tools/list` (one bad tool
+/// sinks them all). Two bans:
+///
+///   1. No BOOLEAN subschema in a `properties`/`items` position. schemars derives a bare
+///      `serde_json::Value` as the boolean schema `true`; Claude Code's validator rejects it
+///      there (found live: fetch_posting's `posting: Value`). `additionalProperties` is
+///      exempt — boolean is the conventional strictness switch there and clients take it.
+///   2. No `$ref`/`$defs`/`definitions`. A `$ref` is spec-legal but a weak client validator
+///      may not resolve it (G.3: mark_obit's `ObitKind` enum shipped one). Named types are
+///      inlined via `#[schemars(inline)]` / a hand-written `JsonSchema` instead.
+///
+/// This is a client-compat conformance check, not a JSON-Schema meta-validation: the point
+/// is what a real MCP client's validator REJECTS, and those constructs are all valid schema.
+fn assert_client_safe_schema(path: &str, node: &serde_json::Value) {
     match node {
         serde_json::Value::Object(obj) => {
             for (key, val) in obj {
                 let child = format!("{path}/{key}");
+                assert!(
+                    !matches!(key.as_str(), "$ref" | "$defs" | "definitions"),
+                    "client-unsafe `{key}` at {child}: a weak validator may not resolve it and \
+                     one rejected tool sinks the whole listing — inline the schema instead"
+                );
                 if key == "properties" {
                     if let Some(props) = val.as_object() {
                         for (name, schema) in props {
@@ -127,12 +141,12 @@ fn assert_no_boolean_subschemas(path: &str, node: &serde_json::Value) {
                 } else if key == "items" {
                     assert!(val.is_object(), "boolean subschema at {child}: {val}");
                 }
-                assert_no_boolean_subschemas(&child, val);
+                assert_client_safe_schema(&child, val);
             }
         }
         serde_json::Value::Array(arr) => {
             for (i, v) in arr.iter().enumerate() {
-                assert_no_boolean_subschemas(&format!("{path}/{i}"), v);
+                assert_client_safe_schema(&format!("{path}/{i}"), v);
             }
         }
         _ => {}
@@ -140,17 +154,17 @@ fn assert_no_boolean_subschemas(path: &str, node: &serde_json::Value) {
 }
 
 #[tokio::test]
-async fn tool_schemas_hold_no_boolean_subschemas() -> anyhow::Result<()> {
+async fn tool_schemas_are_client_safe() -> anyhow::Result<()> {
     let fixture = Fixture::new("schemas");
     let client = connect(&fixture).await?;
 
     let tools = client.list_tools(Default::default()).await?;
     for tool in &tools.tools {
         let input = serde_json::to_value(tool.input_schema.as_ref())?;
-        assert_no_boolean_subschemas(&format!("{}/inputSchema", tool.name), &input);
+        assert_client_safe_schema(&format!("{}/inputSchema", tool.name), &input);
         if let Some(out) = &tool.output_schema {
             let output = serde_json::to_value(out.as_ref())?;
-            assert_no_boolean_subschemas(&format!("{}/outputSchema", tool.name), &output);
+            assert_client_safe_schema(&format!("{}/outputSchema", tool.name), &output);
         }
     }
 
