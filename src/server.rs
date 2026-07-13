@@ -110,32 +110,44 @@ pub struct DumpCapturesArgs {
 // ---- tool outputs -------------------------------------------------------------------
 //
 // MCP requires an output schema rooted at `type: object`, so each tool returns a small
-// struct (object root) whose heterogeneous payload is carried as `serde_json::Value` —
-// which keeps the schema valid without deriving `JsonSchema` on every model type.
+// struct (object root) whose heterogeneous payload is carried as JSON — which keeps the
+// schema valid without deriving `JsonSchema` on every model type.
 //
-// The trap in that design: schemars derives `serde_json::Value` as the boolean schema
-// `true`. Spec-legal JSON Schema, but Claude Code's tools/list validator rejects a bare
-// boolean as a `properties` value (it tolerates one as `items`), and one bad tool fails
-// the ENTIRE listing — the server connects and no tools load. So every Value-typed
-// field pins an explicit shape via `schema_with`; the e2e surface test enforces that no
-// boolean subschema ever ships again.
+// The trap in that design: schemars derives a bare `serde_json::Value` as the boolean
+// schema `true`. Spec-legal JSON Schema, but Claude Code's tools/list validator rejects
+// a bare boolean as a `properties` value (it tolerates one as `items`), and one bad tool
+// fails the ENTIRE listing — the server connects and no tools load. `JsonObject` closes
+// that off at the type level: it wraps a `Value` and pins its schema to `{"type":
+// "object"}`, so no output field is ever a bare `Value` and the boolean can't ship. The
+// e2e surface test stays as a backstop, but the type now makes the bad state
+// unrepresentable rather than merely test-caught.
 
-fn object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"type": "object"})
-}
+/// A JSON payload whose schema is pinned to `{"type": "object"}`. Serializes
+/// transparently as its inner value; exists only to keep `serde_json::Value` — which
+/// schemars renders as the boolean schema `true` — out of every tool-output field.
+#[derive(Serialize)]
+#[serde(transparent)]
+struct JsonObject(Value);
 
-fn object_array_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"type": "array", "items": {"type": "object"}})
-}
+impl JsonSchema for JsonObject {
+    // Inline, not a `$ref` — reproduce the flat `{"type":"object"}` the old `schema_with`
+    // pins emitted, so the advertised wire schema is unchanged.
+    fn inline_schema() -> bool {
+        true
+    }
 
-fn optional_object_array_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({"type": ["array", "null"], "items": {"type": "object"}})
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "JsonObject".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type": "object"})
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
 struct BoardsResponse {
-    #[schemars(schema_with = "object_array_schema")]
-    boards: Vec<Value>,
+    boards: Vec<JsonObject>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -150,20 +162,17 @@ struct FetchBoardResponse {
     warnings: Vec<String>,
     /// Present only when `full` was set on the request.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(schema_with = "optional_object_array_schema")]
-    postings: Option<Vec<Value>>,
+    postings: Option<Vec<JsonObject>>,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct PostingResponse {
-    #[schemars(schema_with = "object_schema")]
-    posting: Value,
+    posting: JsonObject,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct DiffResponse {
-    #[schemars(schema_with = "object_array_schema")]
-    diffs: Vec<Value>,
+    diffs: Vec<JsonObject>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -175,14 +184,12 @@ struct MarkObitResponse {
 
 #[derive(Serialize, JsonSchema)]
 struct ObitsResponse {
-    #[schemars(schema_with = "object_array_schema")]
-    obits: Vec<Value>,
+    obits: Vec<JsonObject>,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct CapturesResponse {
-    #[schemars(schema_with = "object_array_schema")]
-    captures: Vec<Value>,
+    captures: Vec<JsonObject>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -191,8 +198,7 @@ struct DumpResponse {
     out_dir: String,
     /// One entry per file: its path, plus enough metadata to describe the sample without
     /// carrying the body.
-    #[schemars(schema_with = "object_array_schema")]
-    dumped: Vec<Value>,
+    dumped: Vec<JsonObject>,
 }
 
 #[tool_router]
@@ -242,7 +248,9 @@ impl JobBoardServer {
             }));
         }
         boards.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
-        Ok(Json(BoardsResponse { boards }))
+        Ok(Json(BoardsResponse {
+            boards: boards.into_iter().map(JsonObject).collect(),
+        }))
     }
 
     #[tool(
@@ -289,7 +297,9 @@ impl JobBoardServer {
             ));
         }
 
-        let postings_echo = args.full.then(|| postings.iter().map(to_value).collect());
+        let postings_echo = args
+            .full
+            .then(|| postings.iter().map(|p| JsonObject(to_value(p))).collect());
         Ok(Json(FetchBoardResponse {
             board_id: board.id.to_string(),
             snapshot_id,
@@ -312,7 +322,7 @@ impl JobBoardServer {
             .await
             .map_err(adapter_err)?;
         Ok(Json(PostingResponse {
-            posting: to_value(&detail),
+            posting: JsonObject(to_value(&detail)),
         }))
     }
 
@@ -340,7 +350,9 @@ impl JobBoardServer {
             diffs.push(json!({ "board_id": board.id, "diff": diff }));
         }
         diffs.sort_by(|a, b| a["board_id"].as_str().cmp(&b["board_id"].as_str()));
-        Ok(Json(DiffResponse { diffs }))
+        Ok(Json(DiffResponse {
+            diffs: diffs.into_iter().map(JsonObject).collect(),
+        }))
     }
 
     #[tool(
@@ -381,7 +393,7 @@ impl JobBoardServer {
             .await
             .map_err(store_err)?;
         Ok(Json(ObitsResponse {
-            obits: obits.iter().map(to_value).collect(),
+            obits: obits.iter().map(|o| JsonObject(to_value(o))).collect(),
         }))
     }
 
@@ -406,7 +418,7 @@ impl JobBoardServer {
             .await
             .map_err(store_err)?;
         Ok(Json(CapturesResponse {
-            captures: metas.iter().map(to_value).collect(),
+            captures: metas.iter().map(|m| JsonObject(to_value(m))).collect(),
         }))
     }
 
@@ -464,7 +476,7 @@ impl JobBoardServer {
         }
         Ok(Json(DumpResponse {
             out_dir: out_dir.to_string_lossy().into_owned(),
-            dumped,
+            dumped: dumped.into_iter().map(JsonObject).collect(),
         }))
     }
 }
@@ -503,7 +515,25 @@ fn to_value<T: Serialize>(value: T) -> Value {
 }
 
 fn store_err(e: StoreError) -> McpError {
-    McpError::internal_error(format!("store error: {e}"), None)
+    // StoreError's Display is a terse category ("writing the store") and thiserror doesn't
+    // fold a `#[source]` into it — so `{e}` alone drops the sqlx cause underneath, which is
+    // the part that says WHAT broke (db locked, constraint, disk full) and whether the
+    // caller should retry. Walk the chain so that detail survives the MCP boundary.
+    McpError::internal_error(format!("store error: {}", error_chain(&e)), None)
+}
+
+/// Flatten an error and its `#[source]` chain into one `top: cause: root-cause` line.
+/// thiserror's Display shows only the top message; the causes are where the real detail
+/// lives, and the MCP boundary is a dead end for the caller if they don't come along.
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut msg = e.to_string();
+    let mut src = e.source();
+    while let Some(cause) = src {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    msg
 }
 
 fn adapter_err(e: AdapterError) -> McpError {
@@ -533,5 +563,53 @@ impl ServerHandler for JobBoardServer {
                  ranking and 'should I apply' are the calling model's job."
                     .to_string(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::error_chain;
+
+    // A hand-rolled error whose Display is ONLY its own message (like thiserror's terse
+    // category variants), so the test proves error_chain — not Display — surfaces the cause.
+    #[derive(Debug)]
+    struct Layer {
+        msg: &'static str,
+        cause: Option<Box<Layer>>,
+    }
+
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.msg)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.cause
+                .as_deref()
+                .map(|c| c as &(dyn std::error::Error + 'static))
+        }
+    }
+
+    #[test]
+    fn error_chain_folds_every_source_into_one_line() {
+        let e = Layer {
+            msg: "writing the store",
+            cause: Some(Box::new(Layer {
+                msg: "database is locked",
+                cause: None,
+            })),
+        };
+        assert_eq!(error_chain(&e), "writing the store: database is locked");
+    }
+
+    #[test]
+    fn error_chain_of_a_lone_error_is_just_its_message() {
+        let e = Layer {
+            msg: "opening the store",
+            cause: None,
+        };
+        assert_eq!(error_chain(&e), "opening the store");
     }
 }

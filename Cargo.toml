@@ -1,6 +1,6 @@
 [package]
 name = "job-board-mcp"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 rust-version = "1.85"
 description = "MCP server exposing typed, deterministic job-board tools: fetch, normalize, snapshot and diff postings from hosted ATS APIs."
