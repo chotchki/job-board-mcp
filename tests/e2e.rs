@@ -104,6 +104,60 @@ async fn server_advertises_its_identity_and_the_full_tool_surface() -> anyhow::R
     Ok(())
 }
 
+/// Asserts every position that must hold a schema holds an OBJECT, never a bare
+/// boolean. schemars derives `serde_json::Value` as the boolean schema `true` —
+/// spec-legal, but Claude Code's tools/list validator rejects it as a `properties`
+/// value, and one bad tool fails the entire listing (found live: fetch_posting's
+/// `posting: Value` kept every tool from loading). `additionalProperties` stays
+/// exempt — boolean is the conventional strictness switch there and clients take it.
+fn assert_no_boolean_subschemas(path: &str, node: &serde_json::Value) {
+    match node {
+        serde_json::Value::Object(obj) => {
+            for (key, val) in obj {
+                let child = format!("{path}/{key}");
+                if key == "properties" {
+                    if let Some(props) = val.as_object() {
+                        for (name, schema) in props {
+                            assert!(
+                                schema.is_object(),
+                                "boolean subschema at {child}/{name}: {schema}"
+                            );
+                        }
+                    }
+                } else if key == "items" {
+                    assert!(val.is_object(), "boolean subschema at {child}: {val}");
+                }
+                assert_no_boolean_subschemas(&child, val);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                assert_no_boolean_subschemas(&format!("{path}/{i}"), v);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[tokio::test]
+async fn tool_schemas_hold_no_boolean_subschemas() -> anyhow::Result<()> {
+    let fixture = Fixture::new("schemas");
+    let client = connect(&fixture).await?;
+
+    let tools = client.list_tools(Default::default()).await?;
+    for tool in &tools.tools {
+        let input = serde_json::to_value(tool.input_schema.as_ref())?;
+        assert_no_boolean_subschemas(&format!("{}/inputSchema", tool.name), &input);
+        if let Some(out) = &tool.output_schema {
+            let output = serde_json::to_value(out.as_ref())?;
+            assert_no_boolean_subschemas(&format!("{}/outputSchema", tool.name), &output);
+        }
+    }
+
+    client.cancel().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn list_boards_reflects_the_config() -> anyhow::Result<()> {
     let fixture = Fixture::new("boards");

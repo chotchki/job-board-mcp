@@ -112,9 +112,29 @@ pub struct DumpCapturesArgs {
 // MCP requires an output schema rooted at `type: object`, so each tool returns a small
 // struct (object root) whose heterogeneous payload is carried as `serde_json::Value` —
 // which keeps the schema valid without deriving `JsonSchema` on every model type.
+//
+// The trap in that design: schemars derives `serde_json::Value` as the boolean schema
+// `true`. Spec-legal JSON Schema, but Claude Code's tools/list validator rejects a bare
+// boolean as a `properties` value (it tolerates one as `items`), and one bad tool fails
+// the ENTIRE listing — the server connects and no tools load. So every Value-typed
+// field pins an explicit shape via `schema_with`; the e2e surface test enforces that no
+// boolean subschema ever ships again.
+
+fn object_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "object"})
+}
+
+fn object_array_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": "array", "items": {"type": "object"}})
+}
+
+fn optional_object_array_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({"type": ["array", "null"], "items": {"type": "object"}})
+}
 
 #[derive(Serialize, JsonSchema)]
 struct BoardsResponse {
+    #[schemars(schema_with = "object_array_schema")]
     boards: Vec<Value>,
 }
 
@@ -130,16 +150,19 @@ struct FetchBoardResponse {
     warnings: Vec<String>,
     /// Present only when `full` was set on the request.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "optional_object_array_schema")]
     postings: Option<Vec<Value>>,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct PostingResponse {
+    #[schemars(schema_with = "object_schema")]
     posting: Value,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct DiffResponse {
+    #[schemars(schema_with = "object_array_schema")]
     diffs: Vec<Value>,
 }
 
@@ -152,11 +175,13 @@ struct MarkObitResponse {
 
 #[derive(Serialize, JsonSchema)]
 struct ObitsResponse {
+    #[schemars(schema_with = "object_array_schema")]
     obits: Vec<Value>,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct CapturesResponse {
+    #[schemars(schema_with = "object_array_schema")]
     captures: Vec<Value>,
 }
 
@@ -166,6 +191,7 @@ struct DumpResponse {
     out_dir: String,
     /// One entry per file: its path, plus enough metadata to describe the sample without
     /// carrying the body.
+    #[schemars(schema_with = "object_array_schema")]
     dumped: Vec<Value>,
 }
 
