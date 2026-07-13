@@ -179,3 +179,20 @@ Verified end-to-end: corrupted `obits.kind` under a running server → `list_obi
 in 0.05s with `-32603 "store error: corrupt stored data: obit kind: expected value at line
 1 column 1"` (all three layers present), and the next call still succeeded. The silent hang
 (G.1) is gone for the read path. Unit test: `a_corrupt_stored_row_is_a_typed_error_not_a_panic`.
+
+### H.2 — handler panic boundary — DONE
+
+G.1 showed rmcp contains a panic (process + connection survive) but black-holes the request
+(silent hang). H.1 removed the known panic sources; this is the backstop for the unforeseen.
+`call_tool` is now hand-written (the `#[tool_handler]` macro only generates it when we don't,
+so `list_tools`/`get_tool` still come from the macro) and wraps the router call in
+`catch_handler_panic` — `AssertUnwindSafe(fut).catch_unwind()`, sound because server state is
+an `Arc<Inner>` with no torn-invariant risk. A caught panic becomes
+`internal_error "tool handler panicked: {msg}"`.
+
+Verified end-to-end: a temp panicking tool that black-holed in G.1 now returns in 0.22s with
+`-32603 "tool handler panicked: ..."`, connection still alive. Unit tests:
+`catch_handler_panic_turns_a_panic_into_a_legible_error`, `..._passes_a_normal_result_through`.
+
+With H.1 + H.2, the "silent hang" failure mode is closed: known panic sources are typed
+errors, and any unforeseen panic is caught and reported. No caller request can black-hole.

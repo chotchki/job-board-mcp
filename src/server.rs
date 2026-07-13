@@ -11,7 +11,7 @@ use std::sync::Arc;
 use rmcp::{
     ErrorData as McpError, Json, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Implementation, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
 use schemars::JsonSchema;
@@ -547,6 +547,39 @@ fn adapter_err(e: AdapterError) -> McpError {
     }
 }
 
+/// Wrap a tool-call future so an unforeseen panic surfaces as a legible `McpError` instead of
+/// the silent hang rmcp otherwise leaves. rmcp runs each request on its own task and contains
+/// a panic there — the process and the connection both survive — but the panicking request
+/// gets NO response, so the caller hangs to its own timeout (docs/failure-modes.md G.1). H.1
+/// removed the known panic sources; this is the backstop for the unforeseen.
+///
+/// `AssertUnwindSafe` is sound here: server state is an `Arc<Inner>` — a transactional store,
+/// a read-only board map, an http client — so a caught panic leaves no torn invariant behind.
+async fn catch_handler_panic<F>(fut: F) -> Result<CallToolResult, McpError>
+where
+    F: std::future::Future<Output = Result<CallToolResult, McpError>>,
+{
+    use futures_util::FutureExt;
+    match std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+        Ok(result) => result,
+        Err(payload) => Err(McpError::internal_error(
+            format!("tool handler panicked: {}", panic_message(payload.as_ref())),
+            None,
+        )),
+    }
+}
+
+/// Best-effort message from a caught panic payload — `panic!` carries a `&str` or a `String`.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for JobBoardServer {
     fn get_info(&self) -> ServerInfo {
@@ -564,11 +597,23 @@ impl ServerHandler for JobBoardServer {
                     .to_string(),
             )
     }
+
+    // Hand-written so every tool call runs inside a panic boundary — `#[tool_handler]` only
+    // generates `call_tool` when we don't (`has_method` check), so `list_tools`/`get_tool`
+    // still come from the macro. Body mirrors the macro's, plus `catch_handler_panic`.
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        catch_handler_panic(self.tool_router.call(tcc)).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::error_chain;
+    use super::{CallToolResult, catch_handler_panic, error_chain};
 
     // A hand-rolled error whose Display is ONLY its own message (like thiserror's terse
     // category variants), so the test proves error_chain — not Display — surfaces the cause.
@@ -611,5 +656,23 @@ mod tests {
             cause: None,
         };
         assert_eq!(error_chain(&e), "opening the store");
+    }
+
+    #[tokio::test]
+    async fn catch_handler_panic_turns_a_panic_into_a_legible_error() {
+        let out = catch_handler_panic(async { panic!("kaboom in a handler") }).await;
+        let err = out.expect_err("a panicking handler must become Err, not a silent hang");
+        assert!(
+            err.message.contains("tool handler panicked"),
+            "got: {}",
+            err.message
+        );
+        assert!(err.message.contains("kaboom in a handler"), "got: {}", err.message);
+    }
+
+    #[tokio::test]
+    async fn catch_handler_panic_passes_a_normal_result_through() {
+        let out = catch_handler_panic(async { Ok(CallToolResult::default()) }).await;
+        assert!(out.is_ok());
     }
 }

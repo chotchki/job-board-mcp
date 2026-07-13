@@ -16,7 +16,7 @@ Completed phases sweep to PLAN_ARCHIVE.md.
 - [x] G.4 - Census error legibility end-to-end
 ## Phase H - Contain catastrophic failures
 - [x] H.1 - Replace read-path expects on persisted JSON with typed errors
-- [ ] H.2 - Add a handler panic boundary if needed
+- [x] H.2 - Add a handler panic boundary if needed
 - [ ] H.3 - Harden JSON access across all 8 adapters
 ## Phase I - Contract & legibility guardrails
 - [ ] I.1 - Add schema-conformance e2e against a real validator

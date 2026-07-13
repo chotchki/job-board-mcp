@@ -1008,6 +1008,7 @@ dependencies = [
  "anyhow",
  "blake3",
  "chrono",
+ "futures-util",
  "hex",
  "reqwest",
  "rmcp",
