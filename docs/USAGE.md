@@ -64,7 +64,7 @@ The division of labor is the whole point: the tools do the mechanical part with 
 1. **`fetch_board`** each board (the model can loop over `list_boards`). Each successful fetch records a snapshot. A board in maintenance mode returns an error and records nothing — it is never mistaken for an empty board.
 2. **`diff_boards`** — NEW / CHANGED / DEAD since your previous scan, per board. CHANGED names the fields that moved, so a title quietly edited from Staff to Senior, or a band cut, shows up as a real signal rather than getting lost in noise. A board that just bulk-touched every `updated_at` during a reindex produces zero CHANGED, by design. Pass `include_summary: true` to fold each NEW/CHANGED row's last-known title, locations, comp and workplace into the diff — straight from the stored snapshot, no refetch — so triage reads a real row instead of a bare req id. DEAD rows stay id-only (use `fetch_posting` for a dead req's post-mortem).
 3. **`mark_obit`** the rows you're done with, so tomorrow's scan stays quiet (see below).
-4. **`fetch_posting`** the ones you're actually applying to — it returns the full description text/html for capturing the JD at apply time.
+4. **`fetch_posting`** the ones you're actually applying to — it returns the full description text/html for capturing the JD at apply time. If the req has since gone DEAD (fallen off the live board) it does **not** 404 — it serves the last-known stored snapshot with a `dead_as_of` timestamp (list-level, no description), so "what WAS this req?" still has an answer for post-mortem triage.
 
 ## Obit hygiene — how the scan stays quiet
 

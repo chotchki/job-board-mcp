@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use crate::config::BoardConfig;
-use crate::model::{Ats, BoardId, Comp, ObitKind, Posting, ReqId, WorkplaceType};
+use crate::model::{Ats, BoardId, Comp, Equity, ObitKind, Posting, ReqId, WorkplaceType};
 
 /// Things that go wrong opening, migrating, or writing the store.
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +116,28 @@ pub struct PostingSummary {
     pub locations: Vec<String>,
     pub workplace_type: WorkplaceType,
     pub comp: Comp,
+}
+
+/// The last-known posting for a req plus the snapshot it was last seen in — what
+/// `fetch_posting` serves as a post-mortem when the live req is gone (DEAD). Answers "what
+/// WAS this req?" from the store instead of a 404. No description (that only ever comes from
+/// a live detail fetch), so it's list-level and marked stale by the server's `dead_as_of`.
+#[derive(Debug, Serialize)]
+pub struct LastKnownPosting {
+    pub title: String,
+    pub url: String,
+    pub locations: Vec<String>,
+    pub workplace_type: WorkplaceType,
+    pub comp: Comp,
+    pub equity: Equity,
+    pub department: Option<String>,
+    pub employment_type: Option<String>,
+    pub posted_at: Option<String>,
+    pub updated_at: Option<String>,
+    /// The last snapshot this posting appeared in — its "died at". Surfaced by the server as
+    /// `dead_as_of`, kept OUT of the posting body itself.
+    #[serde(skip)]
+    pub last_seen: String,
 }
 
 /// A capture ledger row WITH its body — what `dump_captures` reads to write sample files.
@@ -542,6 +564,48 @@ impl Store {
             .collect()
     }
 
+    /// The last-known posting for one req on a board, or `None` if the req was never seen.
+    /// The row survives a DEAD transition (it's `last_seen`-stamped, not deleted), so this
+    /// answers "what WAS this req?" for a posting that's since fallen off the live board.
+    pub async fn posting_by_req(
+        &self,
+        board_id: &BoardId,
+        req_id: &ReqId,
+    ) -> Result<Option<LastKnownPosting>, StoreError> {
+        let board = board_id.as_str();
+        let req = req_id.as_str();
+        let row = sqlx::query!(
+            "SELECT title, url, locations, workplace_type, comp, equity, department,
+                    employment_type, posted_at, updated_at, last_seen
+             FROM postings WHERE board_id = ?1 AND req_id = ?2",
+            board,
+            req,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(StoreError::Write)?;
+        row.map(|r| {
+            Ok(LastKnownPosting {
+                title: r.title,
+                url: r.url,
+                locations: serde_json::from_str(&r.locations)
+                    .map_err(|e| StoreError::corrupt("posting locations", e))?,
+                workplace_type: serde_json::from_str(&r.workplace_type)
+                    .map_err(|e| StoreError::corrupt("posting workplace_type", e))?,
+                comp: serde_json::from_str(&r.comp)
+                    .map_err(|e| StoreError::corrupt("posting comp", e))?,
+                equity: serde_json::from_str(&r.equity)
+                    .map_err(|e| StoreError::corrupt("posting equity", e))?,
+                department: r.department,
+                employment_type: r.employment_type,
+                posted_at: r.posted_at,
+                updated_at: r.updated_at,
+                last_seen: r.last_seen,
+            })
+        })
+        .transpose()
+    }
+
     /// Mark a posting (by req_id) or a freeform key dead, rejected, out-of-scope or a
     /// ghost, so it stops surfacing as NEW. Re-marking the same key updates it. `marked_at`
     /// is injected, like every other timestamp — the store reads no clock.
@@ -838,6 +902,34 @@ mod tests {
         assert_eq!(one.locations, vec!["Remote".to_owned()]);
         assert_eq!(one.workplace_type, WorkplaceType::Remote);
         assert!(matches!(one.comp, Comp::None));
+    }
+
+    #[tokio::test]
+    async fn posting_by_req_returns_last_known_with_died_at_or_none() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.upsert_board(&board()).await.unwrap();
+        let id = BoardId::new("gitlab");
+        store
+            .record_snapshot(&id, day(3), &[posting("R1", "Staff Engineer")])
+            .await
+            .unwrap();
+
+        let known = store
+            .posting_by_req(&id, &ReqId::new("R1"))
+            .await
+            .unwrap()
+            .expect("R1 was seen");
+        assert_eq!(known.title, "Staff Engineer");
+        // last_seen is the snapshot it last appeared in — its died-at once it goes DEAD.
+        assert_eq!(known.last_seen, day(3).to_rfc3339());
+
+        assert!(
+            store
+                .posting_by_req(&id, &ReqId::new("nope"))
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

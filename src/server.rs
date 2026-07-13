@@ -23,7 +23,7 @@ use crate::clock;
 use crate::config::BoardConfig;
 use crate::http::HttpClient;
 use crate::model::{Ats, BoardId, ObitKind, ReqId};
-use crate::store::{BoardDiff, PostingSummary, Store, StoreError};
+use crate::store::{BoardDiff, LastKnownPosting, PostingSummary, Store, StoreError};
 
 struct Inner {
     store: Arc<Store>,
@@ -174,6 +174,12 @@ struct FetchBoardResponse {
 #[derive(Serialize, JsonSchema)]
 struct PostingResponse {
     posting: JsonObject,
+    /// Set ONLY when the live req is gone and `posting` is the last-known STORED snapshot:
+    /// the time it was last seen (its "died at"). Its presence is the staleness marker — the
+    /// posting is list-level (no description) and no fresher than this timestamp. Absent on a
+    /// normal live hit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dead_as_of: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -323,12 +329,29 @@ impl JobBoardServer {
         Parameters(args): Parameters<FetchPostingArgs>,
     ) -> Result<Json<PostingResponse>, McpError> {
         let board = self.board(&args.board_id)?;
-        let detail = adapter::detail_for(&self.inner.http, board, &ReqId::new(args.req_id))
-            .await
-            .map_err(adapter_err)?;
-        Ok(Json(PostingResponse {
-            posting: JsonObject(to_value(&detail)),
-        }))
+        let req = ReqId::new(args.req_id);
+        match adapter::detail_for(&self.inner.http, board, &req).await {
+            Ok(detail) => Ok(Json(PostingResponse {
+                posting: JsonObject(to_value(&detail)),
+                dead_as_of: None,
+            })),
+            // The live req is gone. Serve the last-known stored snapshot as a post-mortem
+            // instead of 404ing — "what WAS this req?" is DEAD-triage's first question. A req
+            // we never stored is still a genuine PostingNotFound.
+            Err(AdapterError::PostingNotFound(_)) => {
+                match self
+                    .inner
+                    .store
+                    .posting_by_req(&board.id, &req)
+                    .await
+                    .map_err(store_err)?
+                {
+                    Some(last) => Ok(Json(dead_posting_response(last))),
+                    None => Err(adapter_err(AdapterError::PostingNotFound(req))),
+                }
+            }
+            Err(e) => Err(adapter_err(e)),
+        }
     }
 
     #[tool(
@@ -562,6 +585,16 @@ fn enrich_diff(diff: &BoardDiff, summaries: &HashMap<ReqId, PostingSummary>) -> 
             .collect::<Vec<_>>(),
         "dead": to_value(&diff.dead),
     })
+}
+
+/// The post-mortem response for a DEAD req: the stored last-known posting as the body, its
+/// `last_seen` surfaced as `dead_as_of` (and kept out of the body — it's `#[serde(skip)]` on
+/// the stored type). No description; that only ever comes from a live detail fetch.
+fn dead_posting_response(last: LastKnownPosting) -> PostingResponse {
+    PostingResponse {
+        dead_as_of: Some(last.last_seen.clone()),
+        posting: JsonObject(to_value(&last)),
+    }
 }
 
 /// The machine-branchable class of a failure, mirrored into `McpError.data` as
@@ -856,5 +889,30 @@ mod tests {
         assert!(out["changed"][0].get("title").is_none());
         // DEAD stays a bare id array — nothing current to summarize.
         assert_eq!(out["dead"][0], "d1");
+    }
+
+    #[test]
+    fn dead_posting_response_surfaces_last_seen_and_keeps_it_out_of_the_body() {
+        use super::{LastKnownPosting, dead_posting_response, to_value};
+        use crate::model::{Comp, Equity, WorkplaceType};
+
+        let last = LastKnownPosting {
+            title: "Staff Engineer".into(),
+            url: "https://x/R1".into(),
+            locations: vec!["Remote".into()],
+            workplace_type: WorkplaceType::Remote,
+            comp: Comp::None,
+            equity: Equity::None,
+            department: None,
+            employment_type: None,
+            posted_at: None,
+            updated_at: None,
+            last_seen: "2026-07-10T00:00:00+00:00".into(),
+        };
+        let resp = to_value(dead_posting_response(last));
+        assert_eq!(resp["dead_as_of"], "2026-07-10T00:00:00+00:00");
+        assert_eq!(resp["posting"]["title"], "Staff Engineer");
+        // last_seen is surfaced ONLY as dead_as_of, never duplicated into the posting body.
+        assert!(resp["posting"].get("last_seen").is_none());
     }
 }

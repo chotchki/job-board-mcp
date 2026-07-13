@@ -17,9 +17,9 @@ the 7/13 scan burned an 8-agent fan-out (~490K subagent tokens) just to turn 60 
 - [x] J.3 - Tests + docs for include_summary
 ## Phase K - Dead-req post-mortem serving
 fetch_posting on a req that just went DEAD returns PostingNotFound (sofi 7601581003/7782185003, 7/13 scan), so "what WAS that req?" — the first question DEAD-triage asks — has no answer outside a manual capture-ledger dig. Serve the last-known snapshot with a `dead_as_of` marker, or grow a `fetch_dead_posting`. Added 2026-07-13.
-- [ ] K.1 - Store: last-known posting getter by req
-- [ ] K.2 - Server: fetch_posting dead-req fallback
-- [ ] K.3 - Tests + docs for dead-req serving
+- [x] K.1 - Store: last-known posting getter by req
+- [x] K.2 - Server: fetch_posting dead-req fallback
+- [x] K.3 - Tests + docs for dead-req serving
 
 ## Backlog (not yet phased)
 
