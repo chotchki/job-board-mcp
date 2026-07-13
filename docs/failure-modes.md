@@ -163,3 +163,19 @@ narrow and now mapped:
 Everything else is legible and/or guarded by construction. H.2 (panic boundary), H.3
 (adapter audit), and the I.* guardrails are hardening + regression prevention, not
 fire-fighting. The two loud bugs were the exception, not the tip of an iceberg.
+
+---
+
+## Remediations
+
+### H.1 — read-path expects → `StoreError::Corrupt` — DONE
+
+The four persisted-JSON reads (changed_fields, obit kind, capture ats ×2) now propagate a
+typed `StoreError::Corrupt { what, source }` instead of `.expect()`-panicking. Each
+map-closure collects into `Result<Vec<_>, StoreError>`; the error flows through `store_err`'s
+source-chain walk unchanged.
+
+Verified end-to-end: corrupted `obits.kind` under a running server → `list_obits` returned
+in 0.05s with `-32603 "store error: corrupt stored data: obit kind: expected value at line
+1 column 1"` (all three layers present), and the next call still succeeded. The silent hang
+(G.1) is gone for the read path. Unit test: `a_corrupt_stored_row_is_a_typed_error_not_a_panic`.

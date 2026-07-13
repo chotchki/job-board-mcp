@@ -25,6 +25,23 @@ pub enum StoreError {
     Migrate(#[source] sqlx::migrate::MigrateError),
     #[error("writing the store")]
     Write(#[source] sqlx::Error),
+    /// A row we read back doesn't deserialize. The store only holds JSON we wrote, so this
+    /// means corruption, a partial write, or migration drift — NOT bad caller input. Named
+    /// rather than `.expect()`-panicked: a panic in a handler black-holes the request (a
+    /// silent hang the caller never gets an error for), a typed error reaches them. See
+    /// docs/failure-modes.md G.1.
+    #[error("corrupt stored data: {what}")]
+    Corrupt {
+        what: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
+impl StoreError {
+    fn corrupt(what: &'static str, source: serde_json::Error) -> Self {
+        StoreError::Corrupt { what, source }
+    }
 }
 
 /// JSON-encode a model value for a TEXT column. The Rust type stays the single source of
@@ -448,12 +465,14 @@ impl Store {
         .await
         .map_err(StoreError::Write)?
         .into_iter()
-        .map(|r| ChangedPosting {
-            req_id: ReqId::new(r.req_id),
-            changed_fields: serde_json::from_str(&r.changed_fields)
-                .expect("changed_fields is JSON we wrote"),
+        .map(|r| {
+            Ok(ChangedPosting {
+                req_id: ReqId::new(r.req_id),
+                changed_fields: serde_json::from_str(&r.changed_fields)
+                    .map_err(|e| StoreError::corrupt("changed_fields", e))?,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, StoreError>>()?;
 
         let dead = match prev_taken {
             None => Vec::new(),
@@ -524,16 +543,18 @@ impl Store {
         .await
         .map_err(StoreError::Write)?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| ObitRecord {
-                board_id: BoardId::new(r.board_id),
-                key: r.key,
-                kind: serde_json::from_str(&r.kind).expect("obit kind is JSON we wrote"),
-                reason: r.reason,
-                marked_at: r.marked_at,
+        rows.into_iter()
+            .map(|r| {
+                Ok(ObitRecord {
+                    board_id: BoardId::new(r.board_id),
+                    key: r.key,
+                    kind: serde_json::from_str(&r.kind)
+                        .map_err(|e| StoreError::corrupt("obit kind", e))?,
+                    reason: r.reason,
+                    marked_at: r.marked_at,
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// Record a raw response and, in the same call, purge anything older than the
@@ -598,19 +619,21 @@ impl Store {
         .fetch_all(&self.pool)
         .await
         .map_err(StoreError::Write)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| CaptureMeta {
-                id: r.id,
-                board_id: BoardId::new(r.board_id),
-                ats: serde_json::from_str(&r.ats).expect("ats is JSON we wrote"),
-                url: r.url,
-                method: r.method,
-                status: r.status,
-                captured_at: r.captured_at,
-                bytes: r.bytes,
+        rows.into_iter()
+            .map(|r| {
+                Ok(CaptureMeta {
+                    id: r.id,
+                    board_id: BoardId::new(r.board_id),
+                    ats: serde_json::from_str(&r.ats)
+                        .map_err(|e| StoreError::corrupt("capture ats", e))?,
+                    url: r.url,
+                    method: r.method,
+                    status: r.status,
+                    captured_at: r.captured_at,
+                    bytes: r.bytes,
+                })
             })
-            .collect())
+            .collect()
     }
 
     /// The capture ledger WITH bodies, newest first — what `dump_captures` reads to write
@@ -633,17 +656,19 @@ impl Store {
         .fetch_all(&self.pool)
         .await
         .map_err(StoreError::Write)?;
-        Ok(rows
-            .into_iter()
-            .map(|r| CaptureRecord {
-                id: r.id,
-                board_id: BoardId::new(r.board_id),
-                ats: serde_json::from_str(&r.ats).expect("ats is JSON we wrote"),
-                url: r.url,
-                captured_at: r.captured_at,
-                body: r.body,
+        rows.into_iter()
+            .map(|r| {
+                Ok(CaptureRecord {
+                    id: r.id,
+                    board_id: BoardId::new(r.board_id),
+                    ats: serde_json::from_str(&r.ats)
+                        .map_err(|e| StoreError::corrupt("capture ats", e))?,
+                    url: r.url,
+                    captured_at: r.captured_at,
+                    body: r.body,
+                })
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -700,6 +725,35 @@ mod tests {
     async fn migrations_apply_and_the_query_pipeline_works() {
         let store = Store::open_in_memory().await.unwrap();
         assert_eq!(store.board_count().await.unwrap(), 0);
+    }
+
+    /// A row we wrote gets corrupted underneath us (partial write, migration drift, a manual
+    /// edit). The read must surface a typed `StoreError::Corrupt` — NOT panic, because a panic
+    /// in a tool handler black-holes the request into a silent hang the caller never gets an
+    /// error for (docs/failure-modes.md G.1). This is the H.1 guarantee.
+    #[tokio::test]
+    async fn a_corrupt_stored_row_is_a_typed_error_not_a_panic() {
+        let store = Store::open_in_memory().await.unwrap();
+        store.upsert_board(&board()).await.unwrap();
+        store
+            .mark_obit(&BoardId::new("gitlab"), "5551234", ObitKind::Dead, "gone", day(1))
+            .await
+            .unwrap();
+
+        // Clobber the kind column with text that can't deserialize into ObitKind.
+        sqlx::query("UPDATE obits SET kind = 'not-json'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let err = store
+            .list_obits(Some(&BoardId::new("gitlab")))
+            .await
+            .expect_err("a corrupt kind column must read as Err, not Ok or a panic");
+        assert!(
+            matches!(err, StoreError::Corrupt { what: "obit kind", .. }),
+            "expected Corrupt {{ obit kind }}, got {err:?}"
+        );
     }
 
     #[tokio::test]
