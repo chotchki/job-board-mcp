@@ -222,15 +222,9 @@ impl JobBoardServer {
     }
 
     fn board(&self, id: &str) -> Result<&BoardConfig, McpError> {
-        self.inner
-            .boards
-            .get(&BoardId::new(id))
-            .ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("unknown board: {id}"),
-                    ErrorKind::BadInput.data(),
-                )
-            })
+        self.inner.boards.get(&BoardId::new(id)).ok_or_else(|| {
+            McpError::invalid_params(format!("unknown board: {id}"), ErrorKind::BadInput.data())
+        })
     }
 
     #[tool(
@@ -730,7 +724,11 @@ mod tests {
             "got: {}",
             err.message
         );
-        assert!(err.message.contains("kaboom in a handler"), "got: {}", err.message);
+        assert!(
+            err.message.contains("kaboom in a handler"),
+            "got: {}",
+            err.message
+        );
     }
 
     #[tokio::test]

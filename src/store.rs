@@ -736,7 +736,13 @@ mod tests {
         let store = Store::open_in_memory().await.unwrap();
         store.upsert_board(&board()).await.unwrap();
         store
-            .mark_obit(&BoardId::new("gitlab"), "5551234", ObitKind::Dead, "gone", day(1))
+            .mark_obit(
+                &BoardId::new("gitlab"),
+                "5551234",
+                ObitKind::Dead,
+                "gone",
+                day(1),
+            )
             .await
             .unwrap();
 
@@ -751,7 +757,13 @@ mod tests {
             .await
             .expect_err("a corrupt kind column must read as Err, not Ok or a panic");
         assert!(
-            matches!(err, StoreError::Corrupt { what: "obit kind", .. }),
+            matches!(
+                err,
+                StoreError::Corrupt {
+                    what: "obit kind",
+                    ..
+                }
+            ),
             "expected Corrupt {{ obit kind }}, got {err:?}"
         );
     }

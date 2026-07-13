@@ -204,7 +204,10 @@ impl WorkdayAdapter {
             // pulled req, not a usable posting. Stay loud rather than return url: "" (the
             // list path is already hard on a titled posting missing its req id).
             url: info.external_url.ok_or_else(|| {
-                AdapterError::drift("workday jobPostingInfo", "detail response has no externalUrl")
+                AdapterError::drift(
+                    "workday jobPostingInfo",
+                    "detail response has no externalUrl",
+                )
             })?,
             locations,
             workplace_type,
