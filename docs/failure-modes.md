@@ -196,3 +196,30 @@ Verified end-to-end: a temp panicking tool that black-holed in G.1 now returns i
 
 With H.1 + H.2, the "silent hang" failure mode is closed: known panic sources are typed
 errors, and any unforeseen panic is caught and reported. No caller request can black-hole.
+
+### H.3 — adapter JSON-access audit + fix — DONE
+
+Audited all 8 adapters + parse.rs for required-field (req_id / title / url) access that
+silently yields empty/default instead of `ParseDrift`. Verdict: 7 GUARDED, 1 GAP (fixed).
+
+- GUARDED: required fields are non-`Option` serde fields, or built via `format!` from required
+  parts (smartrecruiters, workable, workday LIST path), or fall back to a VALID constructed
+  url (github_careers → `https://www.github.careers/jobs/{slug}`). Optional fields
+  (description, locations, comp, dates, workplace) default correctly. `parse.rs::interval`
+  defaults to `""` → `ParseDrift` on an unrecognized unit (by design). Zero `.unwrap()` on
+  payload data (confirms G.2).
+- GAP → FIXED: workday `detail_from` (the `fetch_posting` path) did
+  `url: external_url.unwrap_or_default()` — a required url silently emptied when Workday's
+  detail omits `externalUrl`. Now `ParseDrift`, matching the list path (already hard on a
+  titled posting missing its req id). No existing detail test broke, so healthy Workday
+  details carry `externalUrl`; the drift fires only on genuine absence. Test:
+  `a_detail_with_no_external_url_is_drift_not_an_empty_url`.
+
+Note: the list path's `"<unknown>"` req label (workday.rs:131) is SAFE — it labels a SKIPPED
+stub (no title/path), never a real posting.
+
+## Phase H verdict
+
+The silent-failure surface is closed. Panics (read-path + unforeseen) are legible errors, and
+the one adapter gap that let a garbage posting through is a hard drift. Only I.4 (inline the
+`mark_obit` enum) remains as a concrete fragility fix; the rest of I is regression guards.

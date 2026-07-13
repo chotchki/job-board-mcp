@@ -200,7 +200,12 @@ impl WorkdayAdapter {
             board_id: board.id.clone(),
             req_id: ReqId::new(info.job_req_id),
             title: info.title,
-            url: info.external_url.unwrap_or_default(),
+            // A detail with no externalUrl is a posting you can't apply to — drift or a
+            // pulled req, not a usable posting. Stay loud rather than return url: "" (the
+            // list path is already hard on a titled posting missing its req id).
+            url: info.external_url.ok_or_else(|| {
+                AdapterError::drift("workday jobPostingInfo", "detail response has no externalUrl")
+            })?,
             locations,
             workplace_type,
             remote_scope: None,
@@ -329,6 +334,29 @@ mod tests {
             comp_site_only: false,
             updated_at_unreliable: false,
         }
+    }
+
+    /// A titled detail with no externalUrl used to become a `url: ""` posting flowed into the
+    /// store (H.3). It must be `ParseDrift` — a posting you can't apply to is drift or a pulled
+    /// req, not usable data.
+    #[test]
+    fn a_detail_with_no_external_url_is_drift_not_an_empty_url() {
+        let info = JobPostingInfo {
+            title: "Staff Engineer".to_owned(),
+            job_req_id: "JR123".to_owned(),
+            job_description: None,
+            location: None,
+            additional_locations: Vec::new(),
+            start_date: None,
+            time_type: None,
+            external_url: None,
+        };
+        let err = WorkdayAdapter::detail_from(info, &board())
+            .expect_err("a detail with no externalUrl must be drift, not a url:\"\" posting");
+        assert!(
+            matches!(err, AdapterError::ParseDrift { .. }),
+            "expected ParseDrift, got {err:?}"
+        );
     }
 
     #[test]
